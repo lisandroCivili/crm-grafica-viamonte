@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import date
 
 # --- ESQUEMAS PARA CLIENTES ---
@@ -20,4 +20,49 @@ class ClienteResponse(ClienteBase):
     id: str
 
     # Esto le dice a Pydantic que lea los datos directo desde los modelos de SQLAlchemy
+    model_config = {"from_attributes": True}
+
+# --- ESQUEMAS PARA TRABAJOS ---
+class TrabajoBase(BaseModel):
+    cliente_id: str
+    descripcion_producto: str
+    cantidad: int
+    estado: Optional[str] = "Pendiente de Pago"
+    fecha_creacion: date
+    fecha_comienzo: Optional[date] = None
+    fecha_entrega: Optional[date] = None
+    precio_venta: float
+    costo_total_materiales: float
+    forma_pago_heredada: Optional[str] = None
+
+class TrabajoCreate(TrabajoBase):
+    pass
+
+class TrabajoUpdate(BaseModel):
+    # Esquema específico para cuando movemos la tarjetita en el tablero Kanban
+    estado: Optional[str] = None
+    fecha_comienzo: Optional[date] = None
+    fecha_entrega: Optional[date] = None
+
+class TrabajoResponse(TrabajoBase):
+    id: str
+    model_config = {"from_attributes": True}
+
+
+# --- ESQUEMAS PARA PRESUPUESTOS ---
+class PresupuestoBase(BaseModel):
+    cliente_id: str
+    detalle_costos_interno: Dict[str, Any] # Recibe el JSON con el desglose
+    porcentaje_ganancia: float
+    precio_final_neto: float
+    fecha_emision: date
+    metodo_pago_elegido: str
+    recargo_descuento_porcentaje: Optional[float] = 0.0
+
+class PresupuestoCreate(PresupuestoBase):
+    pass
+
+class PresupuestoResponse(PresupuestoBase):
+    id: str
+    numero_secuencia: str
     model_config = {"from_attributes": True}

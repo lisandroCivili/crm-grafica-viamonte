@@ -17,9 +17,7 @@ def crear_cliente(cliente: schemas.ClienteCreate, db: Session = Depends(get_db))
     if db_cliente:
         raise HTTPException(status_code=400, detail="Este DNI/CUIT ya está registrado.")
     
-    # Creamos el registro con un UUID generado automáticamente
     nuevo_cliente = models.Cliente(
-        id=str(uuid.uuid4()),
         **cliente.model_dump()
     )
     
