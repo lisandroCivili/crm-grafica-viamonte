@@ -66,3 +66,57 @@ class PresupuestoResponse(PresupuestoBase):
     id: str
     numero_secuencia: str
     model_config = {"from_attributes": True}
+
+
+# --- ESQUEMAS PARA CHEQUES ---
+class ChequeBase(BaseModel):
+    tipo: str # "Recibido" o "Emitido"
+    numero_cheque: str
+    banco: str
+    monto: float
+    fecha_cobro: date
+    estado: Optional[str] = "Pendiente"
+
+class ChequeCreate(ChequeBase):
+    pass
+
+class ChequeUpdate(BaseModel):
+    estado: str # Para pasarlo rápido a "Cobrado" o "Rechazado"
+
+class ChequeResponse(ChequeBase):
+    id: str
+    model_config = {"from_attributes": True}
+
+
+# --- ESQUEMAS PARA GASTOS ---
+class GastoBase(BaseModel):
+    concepto: str
+    categoria: str
+    monto: float
+    fecha: date
+
+class GastoCreate(GastoBase):
+    pass
+
+class GastoResponse(GastoBase):
+    id: str
+    model_config = {"from_attributes": True}
+
+
+# --- ESQUEMAS PARA STOCK ---
+class StockBase(BaseModel):
+    material: str
+    cantidad_actual: float
+    cantidad_minima: float
+    unidad: str
+
+class StockCreate(StockBase):
+    pass
+
+class StockUpdate(BaseModel):
+    # Ideal para sumar insumos cuando llega mercadería o restar cuando sale un trabajo
+    cantidad_actual: float 
+
+class StockResponse(StockBase):
+    id: str
+    model_config = {"from_attributes": True}
