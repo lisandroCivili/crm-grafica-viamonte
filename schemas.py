@@ -33,6 +33,7 @@ class TrabajoBase(BaseModel):
     fecha_entrega: Optional[date] = None
     precio_venta: float
     costo_total_materiales: float
+    monto_abonado: Optional[float] = 0.0
     forma_pago_heredada: Optional[str] = None
 
 class TrabajoCreate(TrabajoBase):
@@ -41,6 +42,7 @@ class TrabajoCreate(TrabajoBase):
 class TrabajoUpdate(BaseModel):
     # Esquema específico para cuando movemos la tarjetita en el tablero Kanban
     estado: Optional[str] = None
+    monto_abonado: Optional[float] = None
     fecha_comienzo: Optional[date] = None
     fecha_entrega: Optional[date] = None
 
