@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime
 
 # --- ESQUEMAS PARA CLIENTES ---
 
@@ -33,6 +33,7 @@ class TrabajoBase(BaseModel):
     fecha_entrega: Optional[date] = None
     precio_venta: float
     costo_total_materiales: float
+    monto_abonado: Optional[float] = 0.0
     forma_pago_heredada: Optional[str] = None
 
 class TrabajoCreate(TrabajoBase):
@@ -41,6 +42,7 @@ class TrabajoCreate(TrabajoBase):
 class TrabajoUpdate(BaseModel):
     # Esquema específico para cuando movemos la tarjetita en el tablero Kanban
     estado: Optional[str] = None
+    monto_abonado: Optional[float] = None
     fecha_comienzo: Optional[date] = None
     fecha_entrega: Optional[date] = None
 
@@ -119,4 +121,28 @@ class StockUpdate(BaseModel):
 
 class StockResponse(StockBase):
     id: str
+    model_config = {"from_attributes": True}
+
+    # ... (mantené los esquemas anteriores)
+
+class MovimientoCreate(BaseModel):
+    cliente_id: str
+    trabajo_id: Optional[str] = None
+    monto: float
+    tipo: str
+    metodo: Optional[str] = None
+    descripcion: str
+
+class MovimientoResponse(MovimientoCreate):
+    id: str
+    fecha: datetime
+    model_config = {"from_attributes": True}
+
+class NotaCreate(BaseModel):
+    trabajo_id: Optional[str] = None
+    texto: str
+
+class NotaResponse(NotaCreate):
+    id: str
+    fecha_creacion: datetime
     model_config = {"from_attributes": True}
