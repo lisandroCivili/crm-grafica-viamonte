@@ -5,6 +5,10 @@ from database import get_db
 
 router = APIRouter(prefix="/api/movimientos", tags=["Movimientos"])
 
+@router.get("/", response_model=list[schemas.MovimientoResponse])
+def listar_todos_movimientos(db: Session = Depends(get_db)):
+    return db.query(models.Movimiento).all()
+
 @router.post("/", response_model=schemas.MovimientoResponse)
 def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db)):
     nuevo = models.Movimiento(**mov.model_dump())

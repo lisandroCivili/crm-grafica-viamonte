@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from database import engine
 # Importamos todos los routers modulares que creamos
-from routers import clientes, presupuestos, trabajos, cheques, gastos, stock, movimientos, notas
+from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)

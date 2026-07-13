@@ -76,7 +76,8 @@ tr:hover td { background: var(--magenta-soft); }
 
 /* PANELES LATERALES (DRAWERS) */
 .drawer {
-  position: fixed; top: 0; right: -550px; width: 500px; height: 100vh; background: #fff;
+  position: fixed; top: 0; right: -700px; /* <-- Cambiamos esto de -550px a -700px */
+  width: 500px; height: 100vh; background: #fff;
   box-shadow: -4px 0 15px rgba(0,0,0,0.1); transition: right 0.3s ease; padding: 30px;
   z-index: 100; overflow-y: auto; border-left: 1px solid var(--line);
 }
@@ -129,3 +130,50 @@ tr:hover td { background: var(--magenta-soft); }
 .hidden {
   display: none !important;
 }
+
+/* =========================================
+   ESTILOS DE LA FICHA DINÁMICA
+========================================= */
+.tabs-ficha .btn.secondary.active {
+    background: var(--magenta-soft);
+    color: var(--magenta);
+    border-color: var(--magenta);
+}
+.ficha-content { display: none; }
+.ficha-content.active { display: block; }
+
+/* Acordeón de Trabajos */
+.accordion-item {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: #fff;
+    overflow: hidden;
+}
+.accordion-header {
+    padding: 14px 16px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+}
+.accordion-header:hover { background: var(--paper); }
+.accordion-body {
+    padding: 16px;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+    display: none;
+    font-size: 13.5px;
+}
+.accordion-item.open .accordion-body { display: block; }
+
+/* Tarjetas de Notas */
+.nota-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 4px solid var(--amber);
+}
+.nota-fecha { font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
+from datetime import date
 
 router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
 
@@ -22,20 +23,19 @@ def listar_trabajos(estado: str = None, db: Session = Depends(get_db)):
     return query.all()
 
 @router.put("/{trabajo_id}", response_model=schemas.TrabajoResponse)
-def actualizar_estado_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, db: Session = Depends(get_db)):
+def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, db: Session = Depends(get_db)):
     db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    
     if not db_trabajo:
         raise HTTPException(status_code=404, detail="Trabajo no encontrado")
-    
-    # Actualizamos solo los campos que vengan en la petición (para mover la tarjeta)
-    if trabajo_update.estado:
-        db_trabajo.estado = trabajo_update.estado
-    if trabajo_update.fecha_comienzo:
-        db_trabajo.fecha_comienzo = trabajo_update.fecha_comienzo
-    if trabajo_update.fecha_entrega:
-        db_trabajo.fecha_entrega = trabajo_update.fecha_entrega
-        
+
+    update_data = trabajo_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_trabajo, key, value)
+
+    # MAGIA: Si el estado pasa a Diseño o Producción, clavamos la fecha de hoy
+    if trabajo_update.estado in ["En Diseño", "En Producción"] and not db_trabajo.fecha_comienzo:
+        db_trabajo.fecha_comienzo = date.today()
+
     db.commit()
     db.refresh(db_trabajo)
     return db_trabajo
