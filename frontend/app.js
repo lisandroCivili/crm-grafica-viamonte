@@ -162,33 +162,89 @@ async function abrirFicha(id) {
 // ==========================================
 // 4. LÓGICA DE PAGOS Y NOTAS
 // ==========================================
-async function abrirModalPago() {
+// ==========================================
+// FORMULARIO DE PAGOS AVANZADO
+// ==========================================
+async function abrirDrawerPago() {
     if (!clienteActualFicha) return;
     
-    // Usamos prompts nativos por rapidez (luego se puede hacer un modal visual)
-    const montoStr = prompt("Ingrese el monto del pago ($):");
-    if (!montoStr) return;
-    const monto = parseFloat(montoStr);
-    if (isNaN(monto) || monto <= 0) return alert("Monto inválido");
+    try {
+        // Traemos los trabajos del cliente para llenar el <select>
+        const respT = await fetch(`${API_URL}/trabajos/`);
+        const trabajos = await respT.json();
+        
+        // Filtramos solo los trabajos de este cliente
+        const trabajosCliente = trabajos.filter(t => t.cliente_id === clienteActualFicha);
+        
+        const select = document.getElementById('fp_trabajo_id');
+        select.innerHTML = '<option value="">Ninguno (Pago general a cuenta)</option>';
+        
+        trabajosCliente.forEach(t => {
+            // Calculamos cuánto debe de este trabajo en particular
+            const saldoTrabajo = t.precio_venta - (t.monto_abonado || 0);
+            select.innerHTML += `<option value="${t.id}">${t.cantidad}x ${t.descripcion_producto} (Total: $${t.precio_venta})</option>`;
+        });
+        
+    } catch(e) { 
+        console.error("Error al cargar trabajos para el pago:", e); 
+    }
+    
+    toggleDrawer('drawer-nuevo-pago');
+}
 
-    const metodo = prompt("Método de pago (Ej: Efectivo, Transferencia, Cheque):") || "No especificado";
+async function guardarPago(e) {
+    e.preventDefault();
+    const monto = parseFloat(document.getElementById('fp_monto').value);
+    const metodo = document.getElementById('fp_metodo').value;
+    const trabajo_id = document.getElementById('fp_trabajo_id').value || null;
+    
+    try {
+        // 1. Guardamos el Movimiento
+        const respMov = await fetch(`${API_URL}/movimientos/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cliente_id: clienteActualFicha,
+                trabajo_id: trabajo_id,
+                monto: monto,
+                tipo: "Pago",
+                metodo: metodo,
+                descripcion: trabajo_id ? "Pago asociado a trabajo" : "Pago general a cuenta"
+            })
+        });
 
-    const payload = {
-        cliente_id: clienteActualFicha,
-        monto: monto,
-        tipo: "Pago",
-        metodo: metodo,
-        descripcion: "Entrega a cuenta"
-    };
+        if (!respMov.ok) {
+            const errorData = await respMov.json();
+            console.error("Error del backend (Movimientos):", errorData);
+            alert("El servidor rechazó el pago. Revisá la consola (F12).");
+            return;
+        }
 
-    await fetch(`${API_URL}/movimientos/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
+        // 2. Si se asoció a un trabajo, le sumamos el pago a "monto_abonado" en la tabla Trabajos
+        if (trabajo_id) {
+            const respT = await fetch(`${API_URL}/trabajos/`);
+            const trabajos = await respT.json();
+            const trabajoActual = trabajos.find(t => t.id === trabajo_id);
+            
+            if (trabajoActual) {
+                const nuevoAbonado = (trabajoActual.monto_abonado || 0) + monto;
+                await fetch(`${API_URL}/trabajos/${trabajo_id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ monto_abonado: nuevoAbonado })
+                });
+            }
+        }
 
-    abrirFicha(clienteActualFicha); // Refrescamos la ficha para ver el saldo nuevo
-    cargarClientes(); // Refrescamos la tabla de fondo
+        // 3. Limpiamos y recargamos
+        document.getElementById('form-pago').reset();
+        toggleDrawer('drawer-nuevo-pago');
+        abrirFicha(clienteActualFicha); // Refrescamos la ficha para ver el movimiento
+        cargarClientes(); // Refrescamos el saldo de la tabla principal
+
+    } catch (error) {
+        console.error("Error crítico procesando el pago:", error);
+    }
 }
 
 async function guardarNotaFicha() {

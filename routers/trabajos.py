@@ -42,6 +42,8 @@ def actualizar_estado_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUp
         db_trabajo.cantidad = trabajo_update.cantidad
     if trabajo_update.precio_venta is not None:
         db_trabajo.precio_venta = trabajo_update.precio_venta
+    if trabajo_update.monto_abonado is not None:
+        db_trabajo.monto_abonado = trabajo_update.monto_abonado
         
     db.commit()
     db.refresh(db_trabajo)

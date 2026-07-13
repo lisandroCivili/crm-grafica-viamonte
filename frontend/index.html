@@ -312,9 +312,9 @@
       </div>
 
       <!-- 2. CONTENIDO: MOVIMIENTOS -->
-      <div id="ficha-content-movimientos" class="ficha-content" style="display: none;">
+      <div id="ficha-content-movimientos" class="ficha-content">
         <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
-          <button class="btn" style="background: var(--green);" onclick="abrirModalPago()">+ Registrar Pago</button>
+          <button class="btn" style="background: var(--green);" onclick="abrirDrawerPago()">+ Registrar Pago</button>
           <button class="btn secondary" onclick="descargarMovimientosPDF()">⬇️ Descargar PDF</button>
         </div>
         <table id="tabla-movimientos">
@@ -326,7 +326,7 @@
       </div>
 
       <!-- 3. CONTENIDO: NOTAS -->
-      <div id="ficha-content-notas" class="ficha-content" style="display: none;">
+      <div id="ficha-content-notas" class="ficha-content">
         <div style="margin-bottom: 15px; display: flex; gap: 10px;">
           <input type="text" id="nueva-nota-texto" placeholder="Escribir una nota rápida..." style="flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
           <button class="btn" onclick="guardarNotaFicha()">Guardar</button>
@@ -654,6 +654,40 @@
           </button>
         </form>
       </div>
+
+      <!-- DRAWER: REGISTRAR PAGO -->
+    <div id="drawer-nuevo-pago" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-pago')">✖</button>
+      <h3>Registrar Pago</h3>
+      <p style="font-size:12px; color:var(--muted);">El pago se sumará a la cuenta corriente del cliente.</p>
+      
+      <form id="form-pago" onsubmit="guardarPago(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Monto a abonar ($) *</label>
+          <input type="number" id="fp_monto" required style="width: 100%; text-align: left; padding: 10px;">
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Método de Pago *</label>
+          <select id="fp_metodo" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="MercadoPago">MercadoPago</option>
+            <option value="Cheque">Cheque</option>
+          </select>
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Asociar a un Trabajo (Opcional)</label>
+          <!-- Este select se llena solo desde Javascript -->
+          <select id="fp_trabajo_id" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="">Ninguno (Pago general a cuenta)</option>
+          </select>
+        </div>
+        
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--green);">Confirmar Pago</button>
+      </form>
+    </div>
     </main>
 
     <script src="app.js"></script>
