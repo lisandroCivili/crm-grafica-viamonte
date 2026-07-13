@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gráfica Viamonte — CRM Local</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Librerías Externas (Gráficos y PDF) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Hoja de Estilos -->
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- PANTALLA DE LOGIN HARDCODEADO -->
+    <div id="login-screen">
+      <div class="login-box">
+        <h2>Gráfica Viamonte</h2>
+        <p style="color: var(--muted); margin-top: -10px; margin-bottom: 20px">
+          Acceso al sistema local
+        </p>
+        <form id="login-form">
+          <input type="text" id="login-user" placeholder="Usuario" required />
+          <input
+            type="password"
+            id="login-pass"
+            placeholder="Contraseña"
+            required
+          />
+          <button type="submit" class="btn" style="width: 100%">
+            Ingresar
+          </button>
+        </form>
+        <div
+          id="login-error"
+          style="
+            color: var(--red);
+            margin-top: 10px;
+            font-size: 13px;
+            display: none;
+          "
+        >
+          Usuario o clave incorrectos.
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="brand"><div class="brand-name">Gráfica Viamonte</div></div>
+      <nav>
+        <div class="nav-item active" onclick="switchTab('tab-dashboard', this)">
+          📊 Dashboard
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-trabajos', this)">
+          📋 Trabajos
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-presupuestos', this)">
+          💰 Presupuestos
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-clientes', this)">
+          👥 Clientes
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-cheques', this)">
+          🏦 Cheques
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-gastos', this)">
+          📉 Gastos
+        </div>
+        <div class="nav-item" onclick="switchTab('tab-stock', this)">
+          📦 Stock
+        </div>
+      </nav>
+    </aside>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main id="main">
+      <!-- DASHBOARD -->
+      <section id="tab-dashboard" class="view-section active">
+        <div class="topbar"><h1>Radiografía del Negocio</h1></div>
+
+        <div class="kpi-grid">
+          <div class="kpi">
+            <div class="label">Ganancia Neta (Mes)</div>
+            <div class="value" style="color: var(--green)">$380.000</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Total por Cobrar</div>
+            <div class="value" style="color: var(--red)">$412.500</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Cheques a Cobrar</div>
+            <div class="value" style="color: var(--green)">$150.000</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Cheques a Cubrir</div>
+            <div class="value" style="color: var(--amber)">$80.000</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+            "
+          >
+            <h3 style="margin: 0">Gráfico Interactivo</h3>
+            <select
+              id="chartSelector"
+              style="
+                padding: 8px;
+                border-radius: 6px;
+                border: 1px solid var(--line);
+              "
+            >
+              <option>Ingresos vs Gastos Totales</option>
+              <option>Desglose de Gastos (Materiales vs Luz/Sueldos)</option>
+              <option>Evolución de Ganancia Neta</option>
+            </select>
+          </div>
+          <canvas id="chartComparativo" height="80"></canvas>
+        </div>
+      </section>
+
+      <!-- TRABAJOS (TABLERO KANBAN) -->
+      <!-- TRABAJOS (TABLERO KANBAN) -->
+      <section id="tab-trabajos" class="view-section">
+        <div class="topbar">
+          <div>
+            <h1>Tablero de Producción</h1>
+            <div class="sub">Gestión visual del estado del taller</div>
+          </div>
+          <div>
+            <button
+              class="btn pdf"
+              style="margin-right: 10px"
+              onclick="generarInformeDiarioPDF()"
+            >
+              🖨️ Informe Diario (PDF)
+            </button>
+            <button class="btn" onclick="toggleDrawer('drawer-nuevo-trabajo')">
+              + Nuevo Trabajo
+            </button>
+          </div>
+        </div>
+
+        <div class="kanban-board">
+        <div class="kanban-col" id="col-pendiente" ondrop="soltarTarjeta(event, 'Pendiente de Pago')" ondragover="permitirSoltar(event)">
+          <h4>Pendiente / Aprobado</h4>
+        </div>
+        <div class="kanban-col" id="col-diseno" style="background:#e0d9f0;" ondrop="soltarTarjeta(event, 'En Diseño')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--magenta-dark)">En Diseño</h4>
+        </div>
+        <div class="kanban-col" id="col-produccion" style="background:#f7eedb;" ondrop="soltarTarjeta(event, 'En Producción')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--amber)">En Producción</h4>
+        </div>
+        <div class="kanban-col" id="col-entregado" style="background:#dbf0e3;" ondrop="soltarTarjeta(event, 'Entregado')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--green)">Entregado</h4>
+        </div>
+      </div>
+      </section>
+
+      <!-- PRESUPUESTOS -->
+      <section id="tab-presupuestos" class="view-section">
+        <div class="topbar">
+          <h1>Presupuestos</h1>
+          <button class="btn" onclick="toggleDrawer('drawer-presupuesto')">
+            + Nuevo Presupuesto
+          </button>
+        </div>
+        <div class="panel">
+          <p>Listado de presupuestos emitidos...</p>
+        </div>
+      </section>
+
+      <!-- CLIENTES (LISTADO + BUSCADOR) -->
+      <section id="tab-clientes" class="view-section">
+        <div class="topbar">
+          <div>
+            <h1>Base de Clientes</h1>
+            <div class="sub" style="color: var(--muted); margin-top: 4px">
+              Directorio, estado de cuenta y consumos
+            </div>
+          </div>
+          <button class="btn" onclick="toggleDrawer('drawer-nuevo-cliente')">
+            + Agregar Cliente
+          </button>
+        </div>
+
+        <div class="search-wrapper">
+          <input
+            type="text"
+            class="search-input"
+            id="clientSearch"
+            placeholder="🔍 Buscar por nombre, empresa, DNI o CUIT/CUIL..."
+          />
+        </div>
+
+        <div class="panel">
+          <table id="tableClientes">
+            <thead>
+              <tr>
+                <th>Cliente / Razón Social</th>
+                <th>Contacto / Empresa</th>
+                <th>DNI / CUIT</th>
+                <th>Saldo Cta Cte</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Acá se inyectan los clientes con app.js -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- CHEQUES -->
+      <section id="tab-cheques" class="view-section">
+        <div class="topbar"><h1>Gestión de Cheques</h1></div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px">
+          <div class="panel">
+            <h3 style="color: var(--green)">Recibidos (A Cobrar)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha Cobro</th>
+                  <th>Cliente</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>15/08/2026</td>
+                  <td>Pizzería Don Luis</td>
+                  <td class="tnum">$50.000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3 style="color: var(--red)">Emitidos (A Cubrir)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha Cobro</th>
+                  <th>Proveedor</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>20/08/2026</td>
+                  <td>Papelera Tucumán</td>
+                  <td class="tnum">$80.000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- GASTOS Y STOCK (Vistas simplificadas por ahora) -->
+      <section id="tab-gastos" class="view-section">
+        <div class="topbar"><h1>Gastos del Mes</h1></div>
+        <div class="panel"><p>Detalle de gastos...</p></div>
+      </section>
+      <section id="tab-stock" class="view-section">
+        <div class="topbar"><h1>Control de Stock</h1></div>
+        <div class="panel"><p>Insumos disponibles...</p></div>
+      </section>
+
+      <!-- DRAWER: FICHA DEL CLIENTE -->
+      <div id="drawer-cliente" class="drawer">
+        <button class="close-drawer" onclick="toggleDrawer('drawer-cliente')">
+          ✖
+        </button>
+
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 24px;
+          "
+        >
+          <div>
+            <h2 id="ficha-nombre" style="margin: 0; color: var(--magenta)">
+              Nombre Cliente
+            </h2>
+            <p id="ficha-cuit" style="color: var(--muted); margin-top: 4px">
+              CUIT: -
+            </p>
+          </div>
+          <button
+            class="btn pdf"
+            style="padding: 8px 14px; font-size: 12px"
+            onclick="alert('Generando PDF...')"
+          >
+            🖨️ Descargar Ficha
+          </button>
+        </div>
+
+        <div class="kpi" style="margin-bottom: 24px; text-align: center">
+          <div class="label">Saldo de Cuenta Corriente</div>
+          <div
+            class="value"
+            id="ficha-saldo"
+            style="color: var(--red); font-size: 28px"
+          >
+            $0.00
+          </div>
+        </div>
+
+        <h4
+          style="
+            margin: 0 0 10px 0;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 8px;
+          "
+        >
+          Consumo Histórico
+        </h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Producto más pedido</th>
+              <th>Frecuencia</th>
+              <th>Volumen Promedio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Folletos A5 Obra</td>
+              <td>Cada 45 días</td>
+              <td class="tnum">5000 a 10000 u.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- DRAWER: CALCULADOR DE PRESUPUESTO -->
+      <div id="drawer-presupuesto" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-presupuesto')"
+        >
+          ✖
+        </button>
+        <h3>Armar Presupuesto</h3>
+        <p style="font-size: 12px; color: var(--muted)">
+          Ingresá los costos, el sistema calcula la ganancia.
+        </p>
+
+        <div style="margin-top: 20px">
+          <div class="form-group">
+            <label>Papel</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Diseño / Chapas</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Impresión / Tintas</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Troquel / Terminación</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Gastos Varios (Luz, Flete)</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+        </div>
+
+        <div
+          style="
+            margin-top: 20px;
+            border-top: 1px solid var(--line);
+            padding-top: 20px;
+          "
+        >
+          <div class="form-group">
+            <label style="font-weight: bold; color: var(--magenta)"
+              >% de Ganancia Deseada</label
+            >
+            <input
+              type="number"
+              id="porcentaje-ganancia"
+              value="30"
+              oninput="calcularTotalPresupuesto()"
+              style="border-color: var(--magenta)"
+            />
+          </div>
+        </div>
+
+        <div class="resumen-caja">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            "
+          >
+            <span>Subtotal Costos:</span>
+            <span id="lbl-subtotal" class="tnum">$0</span>
+          </div>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            "
+          >
+            <span>Ganancia Neta:</span>
+            <span id="lbl-ganancia" class="tnum">$0</span>
+          </div>
+          <hr
+            style="
+              border: none;
+              border-top: 1px solid rgba(0, 0, 0, 0.1);
+              margin: 10px 0;
+            "
+          />
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: 18px;
+              font-weight: bold;
+            "
+          >
+            <span>Precio Venta:</span>
+            <span id="lbl-total" class="tnum">$0</span>
+          </div>
+        </div>
+        <button class="btn" style="width: 100%; margin-top: 20px">
+          Guardar Presupuesto
+        </button>
+      </div>
+
+      <!-- DRAWER: NUEVO CLIENTE -->
+      <div id="drawer-nuevo-cliente" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-nuevo-cliente')"
+        >
+          ✖
+        </button>
+        <h3>Agregar Cliente Nuevo</h3>
+        <form
+          id="form-cliente"
+          onsubmit="guardarCliente(event)"
+          style="margin-top: 20px"
+        >
+          <div class="form-group">
+            <label>Nombre Completo *</label>
+            <input
+              type="text"
+              id="fc_nombre"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Empresa / Local</label>
+            <input
+              type="text"
+              id="fc_empresa"
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>DNI o CUIT *</label>
+            <input
+              type="text"
+              id="fc_cuit"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Teléfono (WhatsApp) *</label>
+            <input
+              type="text"
+              id="fc_telefono"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Aviso recompra (Días)</label>
+            <input
+              type="number"
+              id="fc_recompra"
+              placeholder="Ej: 45"
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <button
+            type="submit"
+            class="btn"
+            style="width: 100%; margin-top: 20px"
+          >
+            Guardar Cliente
+          </button>
+        </form>
+      </div>
+
+      <!-- DRAWER: NUEVO TRABAJO -->
+      <div id="drawer-nuevo-trabajo" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-nuevo-trabajo')"
+        >
+          ✖
+        </button>
+        <h3>Ingresar Trabajo al Taller</h3>
+        <form
+          id="form-trabajo"
+          onsubmit="guardarTrabajo(event)"
+          style="margin-top: 20px"
+        >
+          <div
+            class="form-group"
+            style="flex-direction: column; align-items: flex-start"
+          >
+            <label style="margin-bottom: 5px">Seleccionar Cliente *</label>
+            <select
+              id="ft_cliente_id"
+              required
+              style="
+                width: 100%;
+                padding: 8px;
+                border: 1px solid var(--line);
+                border-radius: 6px;
+              "
+            ></select>
+          </div>
+          <div
+            class="form-group"
+            style="
+              flex-direction: column;
+              align-items: flex-start;
+              margin-top: 10px;
+            "
+          >
+            <label style="margin-bottom: 5px">Descripción del Producto *</label>
+            <input
+              type="text"
+              id="ft_descripcion"
+              required
+              style="width: 100%; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Cantidad *</label>
+            <input type="number" id="ft_cantidad" required />
+          </div>
+          <div class="form-group">
+            <label>Precio de Venta ($) *</label>
+            <input type="number" id="ft_precio" required />
+          </div>
+          <div class="form-group">
+            <label>Costo de Materiales ($) *</label>
+            <input type="number" id="ft_costo" required />
+          </div>
+          <div
+            class="form-group"
+            style="
+              flex-direction: column;
+              align-items: flex-start;
+              margin-top: 10px;
+            "
+          >
+            <label style="margin-bottom: 5px">Forma de Pago acordada</label>
+            <select
+              id="ft_pago"
+              style="
+                width: 100%;
+                padding: 8px;
+                border: 1px solid var(--line);
+                border-radius: 6px;
+              "
+            >
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Cheque">Cheque</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            class="btn"
+            style="width: 100%; margin-top: 20px"
+          >
+            Enviar a Tablero
+          </button>
+        </form>
+      </div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
