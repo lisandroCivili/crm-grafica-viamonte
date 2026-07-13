@@ -51,6 +51,7 @@ class Movimiento(Base):
 class Nota(Base):
     __tablename__ = "notas"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False) # <--- AGREGAR ESTO
     trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
     texto = Column(Text, nullable=False)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)

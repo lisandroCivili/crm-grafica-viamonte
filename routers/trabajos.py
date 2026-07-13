@@ -35,6 +35,13 @@ def actualizar_estado_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUp
         db_trabajo.fecha_comienzo = trabajo_update.fecha_comienzo
     if trabajo_update.fecha_entrega:
         db_trabajo.fecha_entrega = trabajo_update.fecha_entrega
+    # Adentro de actualizar_estado_trabajo... sumá estos IFs:
+    if trabajo_update.descripcion_producto:
+        db_trabajo.descripcion_producto = trabajo_update.descripcion_producto
+    if trabajo_update.cantidad is not None:
+        db_trabajo.cantidad = trabajo_update.cantidad
+    if trabajo_update.precio_venta is not None:
+        db_trabajo.precio_venta = trabajo_update.precio_venta
         
     db.commit()
     db.refresh(db_trabajo)

@@ -40,11 +40,12 @@ class TrabajoCreate(TrabajoBase):
     pass
 
 class TrabajoUpdate(BaseModel):
-    # Esquema específico para cuando movemos la tarjetita en el tablero Kanban
     estado: Optional[str] = None
-    monto_abonado: Optional[float] = None
     fecha_comienzo: Optional[date] = None
     fecha_entrega: Optional[date] = None
+    descripcion_producto: Optional[str] = None # <-- Sumamos esto
+    cantidad: Optional[int] = None             # <-- Sumamos esto
+    precio_venta: Optional[float] = None
 
 class TrabajoResponse(TrabajoBase):
     id: str
@@ -139,6 +140,7 @@ class MovimientoResponse(MovimientoCreate):
     model_config = {"from_attributes": True}
 
 class NotaCreate(BaseModel):
+    cliente_id: str # <-- Sumamos esto
     trabajo_id: Optional[str] = None
     texto: str
 
