@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime
 
 # --- ESQUEMAS PARA CLIENTES ---
 
@@ -121,4 +121,28 @@ class StockUpdate(BaseModel):
 
 class StockResponse(StockBase):
     id: str
+    model_config = {"from_attributes": True}
+
+    # ... (mantené los esquemas anteriores)
+
+class MovimientoCreate(BaseModel):
+    cliente_id: str
+    trabajo_id: Optional[str] = None
+    monto: float
+    tipo: str
+    metodo: Optional[str] = None
+    descripcion: str
+
+class MovimientoResponse(MovimientoCreate):
+    id: str
+    fecha: datetime
+    model_config = {"from_attributes": True}
+
+class NotaCreate(BaseModel):
+    trabajo_id: Optional[str] = None
+    texto: str
+
+class NotaResponse(NotaCreate):
+    id: str
+    fecha_creacion: datetime
     model_config = {"from_attributes": True}

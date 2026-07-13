@@ -1,5 +1,6 @@
 import uuid
-from sqlalchemy import Column, String, Integer, Float, Date, ForeignKey, JSON
+from datetime import datetime
+from sqlalchemy import Column, String, Integer, Float, Date, DateTime, ForeignKey, JSON, Text
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -13,7 +14,7 @@ class Cliente(Base):
     frecuencia_recompra_dias = Column(Integer, nullable=True)
 
     trabajos = relationship("Trabajo", back_populates="cliente")
-    presupuestos = relationship("Presupuesto", back_populates="cliente")
+    pagos = relationship("Movimiento", back_populates="cliente")
 
 class Trabajo(Base):
     __tablename__ = "trabajos"
@@ -29,51 +30,29 @@ class Trabajo(Base):
     costo_total_materiales = Column(Float, nullable=False)
     monto_abonado = Column(Float, default=0.0)
     forma_pago_heredada = Column(String, nullable=True)
+    notas_iniciales = Column(Text, nullable=True) # <-- Nota opcional al crear
 
     cliente = relationship("Cliente", back_populates="trabajos")
+    notas = relationship("Nota", back_populates="trabajo")
 
-class Presupuesto(Base):
-    __tablename__ = "presupuestos"
+class Movimiento(Base):
+    __tablename__ = "movimientos"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    numero_secuencia = Column(String, unique=True, index=True, nullable=False)
     cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
-    detalle_costos_interno = Column(JSON, nullable=False) 
-    porcentaje_ganancia = Column(Float, nullable=False)
-    precio_final_neto = Column(Float, nullable=False)
-    fecha_emision = Column(Date, nullable=False)
-    metodo_pago_elegido = Column(String, nullable=False)
-    recargo_descuento_porcentaje = Column(Float, default=0.0)
-
-    cliente = relationship("Cliente", back_populates="presupuestos")
-
-
-class Cheque(Base):
-    __tablename__ = "cheques"
-
-    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    tipo = Column(String, nullable=False) # 'Recibido' o 'Emitido'
-    numero_cheque = Column(String, nullable=False)
-    banco = Column(String, nullable=False)
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
+    fecha = Column(DateTime, default=datetime.utcnow)
     monto = Column(Float, nullable=False)
-    fecha_cobro = Column(Date, nullable=False)
-    estado = Column(String, default="Pendiente") # 'Pendiente', 'Cobrado', 'Rechazado'
+    tipo = Column(String, nullable=False) # 'Pago', 'Edición', 'Ajuste'
+    metodo = Column(String, nullable=True) # Ej: 'Efectivo', 'Transferencia'
+    descripcion = Column(String, nullable=False) # Ej: "Pago parcial factura X" o "Edición de cantidad"
 
+    cliente = relationship("Cliente", back_populates="pagos")
 
-class Gasto(Base):
-    __tablename__ = "gastos"
-
+class Nota(Base):
+    __tablename__ = "notas"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    concepto = Column(String, nullable=False) # Ej: "Luz Taller"
-    categoria = Column(String, nullable=False) # Ej: "Servicios", "Insumos Varios"
-    monto = Column(Float, nullable=False)
-    fecha = Column(Date, nullable=False)
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
+    texto = Column(Text, nullable=False)
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
 
-
-class Stock(Base):
-    __tablename__ = "stock"
-
-    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    material = Column(String, nullable=False)
-    cantidad_actual = Column(Float, nullable=False)
-    cantidad_minima = Column(Float, nullable=False) # Gatillo para alertas rojas
-    unidad = Column(String, nullable=False) # Ej: "resmas", "pliegos"
+    trabajo = relationship("Trabajo", back_populates="notas")
