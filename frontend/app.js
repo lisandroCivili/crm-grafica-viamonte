@@ -69,11 +69,9 @@ async function abrirFicha(id) {
     toggleDrawer('drawer-cliente');
     document.getElementById('ficha-nombre').innerText = "Cargando datos...";
     
-    // Reseteamos las pestañas a la primera
     switchFichaTab('trabajos');
 
     try {
-        // Hacemos 4 consultas en paralelo al servidor
         const [respC, respT, respM, respN] = await Promise.all([
             fetch(`${API_URL}/clientes/`),
             fetch(`${API_URL}/trabajos/`),
@@ -91,12 +89,9 @@ async function abrirFicha(id) {
         
         if (!cliente) return;
 
-        // --- CABECERA ---
         document.getElementById('ficha-nombre').innerText = cliente.nombre_completo;
         document.getElementById('ficha-cuit').innerText = `DNI/CUIT: ${cliente.dni_cuit} | Tel: ${cliente.telefono}`;
 
-        // --- SALDO REAL DE CUENTA CORRIENTE ---
-        // Sumamos lo facturado (trabajos) y restamos lo pagado (movimientos)
         const totalFacturado = trabajos.reduce((suma, t) => suma + t.precio_venta, 0);
         const totalPagado = movimientos.filter(m => m.tipo === 'Pago').reduce((suma, m) => suma + m.monto, 0);
         const saldoReal = totalFacturado - totalPagado;
@@ -105,20 +100,27 @@ async function abrirFicha(id) {
         lblSaldo.innerText = `$ ${saldoReal.toLocaleString('es-AR')}`;
         lblSaldo.style.color = saldoReal > 0 ? "var(--red)" : "var(--green)";
 
-        // --- RENDER: PESTAÑA TRABAJOS (Acordeón) ---
         const divTrabajos = document.getElementById('lista-trabajos-cliente');
         divTrabajos.innerHTML = trabajos.length === 0 ? '<p style="text-align:center; color:var(--muted);">Sin historial de trabajos.</p>' : '';
         
-        // Ordenamos para que los más nuevos salgan arriba
         trabajos.reverse().forEach(t => {
+            // LÓGICA NUEVA: Cálculo del pago individual por trabajo
+            const saldoTrabajo = t.precio_venta - (t.monto_abonado || 0);
+            const textoPago = saldoTrabajo <= 0 
+                ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>' 
+                : `<span style="color:var(--red); font-weight:600;">Debe: $${saldoTrabajo.toLocaleString('es-AR')}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${(t.monto_abonado || 0).toLocaleString('es-AR')})</span>`;
+
             divTrabajos.innerHTML += `
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
                         <span>${t.cantidad}x ${t.descripcion_producto}</span>
-                        <span style="color:var(--magenta)">$${t.precio_venta} ▾</span>
+                        <span style="color:var(--magenta)">$${t.precio_venta.toLocaleString('es-AR')} ▾</span>
                     </div>
                     <div class="accordion-body">
-                        <p style="margin:0 0 8px 0;"><b>Estado actual:</b> ${t.estado}</p>
+                        <p style="margin:0 0 8px 0; display:flex; justify-content:space-between;">
+                            <span><b>Estado:</b> ${t.estado}</span>
+                            <span>${textoPago}</span>
+                        </p>
                         <p style="margin:0 0 8px 0;"><b>Fecha de ingreso:</b> ${t.fecha_creacion}</p>
                         <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${t.notas_iniciales || 'Ninguna'}</p>
                         <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}', '${t.descripcion_producto}', ${t.cantidad}, ${t.precio_venta})">✏️ Editar Trabajo</button>
@@ -127,7 +129,6 @@ async function abrirFicha(id) {
             `;
         });
 
-        // --- RENDER: PESTAÑA MOVIMIENTOS ---
         const tbodyMovimientos = document.querySelector('#tabla-movimientos tbody');
         tbodyMovimientos.innerHTML = '';
         movimientos.forEach(m => {
@@ -137,12 +138,11 @@ async function abrirFicha(id) {
                 <tr>
                     <td>${new Date(m.fecha).toLocaleDateString('es-AR')}</td>
                     <td>${m.descripcion} <br><small style="color:var(--muted);">${m.metodo || m.tipo}</small></td>
-                    <td class="tnum" style="color:${colorMonto}; font-weight:600;">${signo}$${m.monto}</td>
+                    <td class="tnum" style="color:${colorMonto}; font-weight:600;">${signo}$${m.monto.toLocaleString('es-AR')}</td>
                 </tr>
             `;
         });
 
-        // --- RENDER: PESTAÑA NOTAS ---
         const divNotas = document.getElementById('lista-notas-cliente');
         divNotas.innerHTML = '';
         notas.forEach(n => {
@@ -425,16 +425,33 @@ async function soltarTarjeta(ev, nuevoEstado) {
     const id = ev.dataTransfer.getData("text");
     const tarjeta = document.getElementById(`card-${id}`);
     const columna = ev.target.closest('.kanban-col');
-    if (columna && tarjeta) columna.appendChild(tarjeta);
+    
+    if (columna && tarjeta) {
+        columna.appendChild(tarjeta);
+    }
 
-    await fetch(`${API_URL}/trabajos/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ estado: nuevoEstado })
-    });
-    cargarTrabajos();
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: nuevoEstado })
+        });
+        
+        if (!resp.ok) throw new Error("Backend rechazó el cambio");
+
+        cargarTrabajos();
+        
+        // Magia visual: Si la ficha del cliente está abierta, la recargamos de fondo
+        const drawerCliente = document.getElementById('drawer-cliente');
+        if (clienteActualFicha && drawerCliente.classList.contains('open')) {
+            abrirFicha(clienteActualFicha);
+        }
+        
+    } catch (error) {
+        console.error("Error al actualizar estado:", error);
+        alert("No se pudo actualizar el estado en el servidor. Revisá la consola.");
+    }
 }
-
 async function cargarTrabajos() {
     const [trabajos, clientes] = await Promise.all([
         (await fetch(`${API_URL}/trabajos/`)).json(),

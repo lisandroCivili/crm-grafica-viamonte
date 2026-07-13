@@ -43,9 +43,10 @@ class TrabajoUpdate(BaseModel):
     estado: Optional[str] = None
     fecha_comienzo: Optional[date] = None
     fecha_entrega: Optional[date] = None
-    descripcion_producto: Optional[str] = None # <-- Sumamos esto
-    cantidad: Optional[int] = None             # <-- Sumamos esto
+    descripcion_producto: Optional[str] = None
+    cantidad: Optional[int] = None
     precio_venta: Optional[float] = None
+    monto_abonado: Optional[float] = None
 
 class TrabajoResponse(TrabajoBase):
     id: str

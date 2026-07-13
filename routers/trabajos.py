@@ -22,28 +22,15 @@ def listar_trabajos(estado: str = None, db: Session = Depends(get_db)):
     return query.all()
 
 @router.put("/{trabajo_id}", response_model=schemas.TrabajoResponse)
-def actualizar_estado_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, db: Session = Depends(get_db)):
+def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, db: Session = Depends(get_db)):
     db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    
     if not db_trabajo:
         raise HTTPException(status_code=404, detail="Trabajo no encontrado")
     
-    # Actualizamos solo los campos que vengan en la petición (para mover la tarjeta)
-    if trabajo_update.estado:
-        db_trabajo.estado = trabajo_update.estado
-    if trabajo_update.fecha_comienzo:
-        db_trabajo.fecha_comienzo = trabajo_update.fecha_comienzo
-    if trabajo_update.fecha_entrega:
-        db_trabajo.fecha_entrega = trabajo_update.fecha_entrega
-    # Adentro de actualizar_estado_trabajo... sumá estos IFs:
-    if trabajo_update.descripcion_producto:
-        db_trabajo.descripcion_producto = trabajo_update.descripcion_producto
-    if trabajo_update.cantidad is not None:
-        db_trabajo.cantidad = trabajo_update.cantidad
-    if trabajo_update.precio_venta is not None:
-        db_trabajo.precio_venta = trabajo_update.precio_venta
-    if trabajo_update.monto_abonado is not None:
-        db_trabajo.monto_abonado = trabajo_update.monto_abonado
+    # Magia de FastAPI: Extrae solo los datos que mandó el Front-End y los actualiza
+    update_data = trabajo_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_trabajo, key, value)
         
     db.commit()
     db.refresh(db_trabajo)
