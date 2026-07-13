@@ -64,13 +64,75 @@ function abrirFichaCliente(nombre) {
     toggleDrawer('drawer-cliente');
 }
 
-// Función para cuando la tabla se llene con la Base de Datos
-function abrirFicha(id) {
-    document.getElementById('ficha-nombre').innerText = "Cargando datos...";
-    // Más adelante acá hacemos un fetch al cliente por su ID
+// ==========================================
+// FICHA DEL CLIENTE DINÁMICA
+// ==========================================
+async function abrirFicha(id) {
+    // Abrimos el panel y ponemos un texto de carga
     toggleDrawer('drawer-cliente');
+    document.getElementById('ficha-nombre').innerText = "Cargando datos...";
+    document.getElementById('ficha-cuit').innerText = "";
+    
+    try {
+        // Traemos todos los clientes (como ya los tenemos, los filtramos)
+        const response = await fetch(`${API_URL}/clientes/`);
+        const clientes = await response.json();
+        const cliente = clientes.find(c => c.id === id);
+        
+        if (cliente) {
+            // Inyectamos los datos reales en el HTML
+            document.getElementById('ficha-nombre').innerText = cliente.nombre_completo;
+            document.getElementById('ficha-cuit').innerText = `DNI/CUIT: ${cliente.dni_cuit} | Tel: ${cliente.telefono}`;
+            
+            // Más adelante acá calculamos el saldo sumando los trabajos y los pagos
+            document.getElementById('ficha-saldo').innerText = "$ 0.00"; 
+        }
+    } catch (error) {
+        console.error("Error al cargar la ficha:", error);
+        document.getElementById('ficha-nombre').innerText = "Error al cargar";
+    }
+}
+// ==========================================
+// KANBAN: LÓGICA DE DRAG AND DROP
+// ==========================================
+
+// Le decimos al navegador que permita soltar elementos acá
+function permitirSoltar(ev) {
+    ev.preventDefault();
 }
 
+// Guardamos el ID del trabajo que estamos arrastrando
+function arrastrarTarjeta(ev, id) {
+    ev.dataTransfer.setData("text", id);
+}
+
+// Qué pasa cuando soltamos la tarjeta en una columna nueva
+async function soltarTarjeta(ev, nuevoEstado) {
+    ev.preventDefault();
+    const id = ev.dataTransfer.getData("text");
+    
+    // Mover la tarjeta visualmente al instante para que se sienta rápido
+    const tarjeta = document.getElementById(`card-${id}`);
+    const columna = ev.target.closest('.kanban-col'); // Buscamos la columna destino
+    
+    if (columna && tarjeta) {
+        columna.appendChild(tarjeta);
+    }
+
+    // Le mandamos el aviso (PUT) al servidor de Python para que guarde el cambio
+    try {
+        await fetch(`${API_URL}/trabajos/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: nuevoEstado })
+        });
+        
+        // Recargamos el tablero de fondo para que actualice los colores y fechas
+        cargarTrabajos();
+    } catch (error) {
+        console.error("Error al actualizar el estado del trabajo:", error);
+    }
+}
 // ==========================================
 // 4. CONEXIÓN A LA API (FETCH)
 // ==========================================
@@ -277,11 +339,9 @@ async function cargarTrabajos() {
         const response = await fetch(`${API_URL}/trabajos/`);
         const trabajos = await response.json();
         
-        // Obtenemos los clientes para cruzar los nombres (ya que el trabajo solo trae el cliente_id)
         const respClientes = await fetch(`${API_URL}/clientes/`);
         const clientes = await respClientes.json();
         
-        // Limpiamos los contenedores
         const cols = {
             "Pendiente de Pago": document.getElementById('col-pendiente'),
             "En Diseño": document.getElementById('col-diseno'),
@@ -289,7 +349,7 @@ async function cargarTrabajos() {
             "Entregado": document.getElementById('col-entregado')
         };
         
-        // Vaciamos el HTML de las tarjetas previas (dejando solo el <h4> del título)
+        // Vaciamos el HTML de las tarjetas previas (dejando solo los títulos <h4>)
         Object.values(cols).forEach(col => {
             if(col) col.innerHTML = col.firstElementChild.outerHTML; 
         });
@@ -299,19 +359,18 @@ async function cargarTrabajos() {
             const nombreCliente = cliente ? cliente.nombre_completo : 'Desconocido';
             const bordeColor = t.estado === "En Diseño" ? "var(--magenta)" : (t.estado === "En Producción" ? "var(--amber)" : "transparent");
             
+            // ACÁ AGREGAMOS LOS ATRIBUTOS DE DRAG AND DROP (draggable y ondragstart)
             const tarjetaHTML = `
-                <div class="kanban-card" style="border-left: 4px solid ${bordeColor}">
+                <div class="kanban-card" id="card-${t.id}" draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')" style="border-left: 4px solid ${bordeColor}; cursor: grab;">
                   <div class="client">${nombreCliente}</div>
                   <div class="job">${t.cantidad}x ${t.descripcion_producto}</div>
                   <div class="date">${t.fecha_creacion} - $${t.precio_venta}</div>
                 </div>
             `;
             
-            // Asignamos a la columna correspondiente
             if (cols[t.estado]) {
                 cols[t.estado].innerHTML += tarjetaHTML;
             } else if (cols["Pendiente de Pago"]) {
-                // Fallback por si el estado es otro
                 cols["Pendiente de Pago"].innerHTML += tarjetaHTML;
             }
         });
