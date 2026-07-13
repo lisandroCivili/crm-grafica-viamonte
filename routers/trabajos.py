@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
+from datetime import date
 
 router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
 
@@ -26,12 +27,15 @@ def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, d
     db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
     if not db_trabajo:
         raise HTTPException(status_code=404, detail="Trabajo no encontrado")
-    
-    # Magia de FastAPI: Extrae solo los datos que mandó el Front-End y los actualiza
+
     update_data = trabajo_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_trabajo, key, value)
-        
+
+    # MAGIA: Si el estado pasa a Diseño o Producción, clavamos la fecha de hoy
+    if trabajo_update.estado in ["En Diseño", "En Producción"] and not db_trabajo.fecha_comienzo:
+        db_trabajo.fecha_comienzo = date.today()
+
     db.commit()
     db.refresh(db_trabajo)
     return db_trabajo

@@ -55,28 +55,17 @@
     <!-- SIDEBAR -->
     <aside id="sidebar">
       <div class="brand"><div class="brand-name">Gráfica Viamonte</div></div>
-      <nav>
-        <div class="nav-item active" onclick="switchTab('tab-dashboard', this)">
-          📊 Dashboard
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-trabajos', this)">
-          📋 Trabajos
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-presupuestos', this)">
-          💰 Presupuestos
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-clientes', this)">
-          👥 Clientes
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-cheques', this)">
-          🏦 Cheques
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-gastos', this)">
-          📉 Gastos
-        </div>
-        <div class="nav-item" onclick="switchTab('tab-stock', this)">
-          📦 Stock
-        </div>
+      <nav class="nav-menu">
+        <div class="nav-item active" onclick="switchTab('tab-dashboard', this)">📊 Dashboard</div>
+        <div class="nav-item" onclick="switchTab('tab-trabajos', this)">📋 Trabajos</div>
+        <div class="nav-item" onclick="switchTab('tab-presupuestos', this)">💰 Presupuestos</div>
+        <div class="nav-item" onclick="switchTab('tab-clientes', this)">👥 Clientes</div>
+        <div class="nav-item" onclick="switchTab('tab-cheques', this)">🏦 Cheques</div>
+        <div class="nav-item" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
+        <div class="nav-item" onclick="switchTab('tab-stock', this)">📦 Stock</div>
+        
+        <!-- Botón de Cerrar Sesión -->
+        <div class="nav-item" style="margin-top: auto; color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
       </nav>
     </aside>
 

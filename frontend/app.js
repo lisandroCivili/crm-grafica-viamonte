@@ -4,6 +4,26 @@ let clienteActualFicha = null; // Guardamos qué cliente está abierto
 // ==========================================
 // 1. INICIALIZACIÓN Y LOGIN
 // ==========================================
+// ==========================================
+// 1. INICIALIZACIÓN Y LOGIN (Persistente)
+// ==========================================
+
+// Ni bien carga la página, revisamos si ya hay una sesión guardada
+// Ni bien carga la página, revisamos sesión y pestaña
+document.addEventListener('DOMContentLoaded', () => {
+    const estaLogueado = localStorage.getItem('viamonte_auth');
+    if (estaLogueado === 'true') {
+        document.getElementById('login-screen').classList.add('hidden');
+        iniciarApp();
+        
+        // Recuperamos la última pestaña en la que estábamos
+        const lastTab = localStorage.getItem('viamonte_last_tab') || 'tab-dashboard';
+        const tabBoton = document.querySelector(`[onclick*="${lastTab}"]`);
+        switchTab(lastTab, tabBoton);
+    }
+});
+
+// Evento del formulario de Login
 document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const user = document.getElementById('login-user').value;
@@ -15,7 +35,12 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usuario: user, contrasenia: pass })
         });
+        
         if (response.ok) {
+            // Guardamos el token en el navegador
+            localStorage.setItem('viamonte_auth', 'true');
+            
+            document.getElementById('login-error').style.display = 'none';
             document.getElementById('login-screen').classList.add('hidden');
             iniciarApp();
         } else {
@@ -25,6 +50,13 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         console.error("Error crítico:", error);
     }
 });
+
+// Función para salir
+function cerrarSesion() {
+    // Borramos el token y recargamos la página
+    localStorage.removeItem('viamonte_auth');
+    window.location.reload();
+}
 
 function iniciarApp() {
     cargarClientes();
@@ -41,6 +73,9 @@ function switchTab(tabId, element) {
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     document.getElementById(tabId).classList.add('active');
     if(element) element.classList.add('active');
+    
+    // Guardamos la última pestaña visitada en la memoria
+    localStorage.setItem('viamonte_last_tab', tabId);
 }
 
 function toggleDrawer(id) {
@@ -104,16 +139,20 @@ async function abrirFicha(id) {
         divTrabajos.innerHTML = trabajos.length === 0 ? '<p style="text-align:center; color:var(--muted);">Sin historial de trabajos.</p>' : '';
         
         trabajos.reverse().forEach(t => {
-            // LÓGICA NUEVA: Cálculo del pago individual por trabajo
-            const saldoTrabajo = t.precio_venta - (t.monto_abonado || 0);
+            const shortId = t.id.substring(0,6).toUpperCase();
+            const pagosDeEsteTrabajo = movimientos
+                .filter(m => m.tipo === 'Pago' && m.trabajo_id === t.id)
+                .reduce((suma, m) => suma + m.monto, 0);
+
+            const saldoTrabajo = t.precio_venta - pagosDeEsteTrabajo;
             const textoPago = saldoTrabajo <= 0 
                 ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>' 
-                : `<span style="color:var(--red); font-weight:600;">Debe: $${saldoTrabajo.toLocaleString('es-AR')}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${(t.monto_abonado || 0).toLocaleString('es-AR')})</span>`;
+                : `<span style="color:var(--red); font-weight:600;">Debe: $${saldoTrabajo.toLocaleString('es-AR')}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${pagosDeEsteTrabajo.toLocaleString('es-AR')})</span>`;
 
             divTrabajos.innerHTML += `
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <span>${t.cantidad}x ${t.descripcion_producto}</span>
+                        <span>#${shortId} - ${t.cantidad}x ${t.descripcion_producto}</span>
                         <span style="color:var(--magenta)">$${t.precio_venta.toLocaleString('es-AR')} ▾</span>
                     </div>
                     <div class="accordion-body">
@@ -122,6 +161,7 @@ async function abrirFicha(id) {
                             <span>${textoPago}</span>
                         </p>
                         <p style="margin:0 0 8px 0;"><b>Fecha de ingreso:</b> ${t.fecha_creacion}</p>
+                        <p style="margin:0 0 8px 0;"><b>Fecha de comienzo:</b> ${t.fecha_comienzo || '-'}</p>
                         <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${t.notas_iniciales || 'Ninguna'}</p>
                         <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}', '${t.descripcion_producto}', ${t.cantidad}, ${t.precio_venta})">✏️ Editar Trabajo</button>
                     </div>
@@ -167,28 +207,19 @@ async function abrirFicha(id) {
 // ==========================================
 async function abrirDrawerPago() {
     if (!clienteActualFicha) return;
-    
     try {
-        // Traemos los trabajos del cliente para llenar el <select>
         const respT = await fetch(`${API_URL}/trabajos/`);
         const trabajos = await respT.json();
-        
-        // Filtramos solo los trabajos de este cliente
         const trabajosCliente = trabajos.filter(t => t.cliente_id === clienteActualFicha);
         
         const select = document.getElementById('fp_trabajo_id');
         select.innerHTML = '<option value="">Ninguno (Pago general a cuenta)</option>';
         
         trabajosCliente.forEach(t => {
-            // Calculamos cuánto debe de este trabajo en particular
-            const saldoTrabajo = t.precio_venta - (t.monto_abonado || 0);
-            select.innerHTML += `<option value="${t.id}">${t.cantidad}x ${t.descripcion_producto} (Total: $${t.precio_venta})</option>`;
+            const shortId = t.id.substring(0,6).toUpperCase();
+            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto} (Total: $${t.precio_venta})</option>`;
         });
-        
-    } catch(e) { 
-        console.error("Error al cargar trabajos para el pago:", e); 
-    }
-    
+    } catch(e) { console.error(e); }
     toggleDrawer('drawer-nuevo-pago');
 }
 
@@ -196,54 +227,37 @@ async function guardarPago(e) {
     e.preventDefault();
     const monto = parseFloat(document.getElementById('fp_monto').value);
     const metodo = document.getElementById('fp_metodo').value;
-    const trabajo_id = document.getElementById('fp_trabajo_id').value || null;
+    const trabajo_id = document.getElementById('fp_trabajo_id').value;
     
+    let desc_pago = "Pago general a cuenta";
+    if (trabajo_id) {
+        const shortId = trabajo_id.substring(0,6).toUpperCase();
+        desc_pago = `Pago asociado a trabajo #${shortId}`;
+    }
+
     try {
-        // 1. Guardamos el Movimiento
         const respMov = await fetch(`${API_URL}/movimientos/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 cliente_id: clienteActualFicha,
-                trabajo_id: trabajo_id,
+                trabajo_id: trabajo_id || null,
                 monto: monto,
                 tipo: "Pago",
                 metodo: metodo,
-                descripcion: trabajo_id ? "Pago asociado a trabajo" : "Pago general a cuenta"
+                descripcion: desc_pago
             })
         });
 
-        if (!respMov.ok) {
-            const errorData = await respMov.json();
-            console.error("Error del backend (Movimientos):", errorData);
-            alert("El servidor rechazó el pago. Revisá la consola (F12).");
-            return;
-        }
+        if (!respMov.ok) throw new Error("Fallo al guardar movimiento");
 
-        // 2. Si se asoció a un trabajo, le sumamos el pago a "monto_abonado" en la tabla Trabajos
-        if (trabajo_id) {
-            const respT = await fetch(`${API_URL}/trabajos/`);
-            const trabajos = await respT.json();
-            const trabajoActual = trabajos.find(t => t.id === trabajo_id);
-            
-            if (trabajoActual) {
-                const nuevoAbonado = (trabajoActual.monto_abonado || 0) + monto;
-                await fetch(`${API_URL}/trabajos/${trabajo_id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ monto_abonado: nuevoAbonado })
-                });
-            }
-        }
-
-        // 3. Limpiamos y recargamos
         document.getElementById('form-pago').reset();
         toggleDrawer('drawer-nuevo-pago');
-        abrirFicha(clienteActualFicha); // Refrescamos la ficha para ver el movimiento
-        cargarClientes(); // Refrescamos el saldo de la tabla principal
+        abrirFicha(clienteActualFicha);
+        cargarClientes();
 
     } catch (error) {
-        console.error("Error crítico procesando el pago:", error);
+        console.error("Error procesando el pago:", error);
     }
 }
 
@@ -284,7 +298,6 @@ async function guardarEdicionTrabajo(e) {
     const nuevaDesc = document.getElementById('fe_descripcion').value;
 
     try {
-        // 1. Actualizamos el Trabajo
         await fetch(`${API_URL}/trabajos/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -295,7 +308,7 @@ async function guardarEdicionTrabajo(e) {
             })
         });
 
-        // 2. Guardamos el Movimiento para que quede en el historial
+        // Acá estaba el error: faltaba el campo "metodo"
         const respMov = await fetch(`${API_URL}/movimientos/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -304,19 +317,14 @@ async function guardarEdicionTrabajo(e) {
                 trabajo_id: id,
                 monto: 0,
                 tipo: "Edición",
-                descripcion: `Cambio: ${razon} (${nuevaCantidad}x ${nuevaDesc} a $${nuevoPrecio})`
+                metodo: "Sistema", // SOLUCIÓN AL CRASHEO
+                descripcion: `Cambio: ${razon} (${nuevaCantidad}x a $${nuevoPrecio})`
             })
         });
 
-        if (!respMov.ok) {
-            const errorData = await respMov.json();
-            console.error("Fallo al guardar el historial:", errorData);
-            alert("El trabajo se editó, pero hubo un error al guardar el historial. Revisá la consola.");
-        }
-
         toggleDrawer('drawer-editar-trabajo');
-        abrirFicha(clienteActualFicha); // Refrescamos todo
-        cargarTrabajos(); // Refrescamos el kanban
+        abrirFicha(clienteActualFicha);
+        cargarTrabajos();
 
     } catch (error) {
         console.error("Error al editar trabajo:", error);
@@ -332,31 +340,38 @@ async function cargarClientes(filtro = "") {
         let url = `${API_URL}/clientes/`;
         if (filtro) url += `?buscar=${filtro}`;
 
-        // Traemos clientes y trabajos
-        const [respC, respT] = await Promise.all([
+        // Ahora pedimos TODO de una para que la matemática sea exacta
+        const [respC, respT, respM] = await Promise.all([
             fetch(url),
-            fetch(`${API_URL}/trabajos/`)
+            fetch(`${API_URL}/trabajos/`),
+            fetch(`${API_URL}/movimientos/`)
         ]);
         
         const clientes = await respC.json();
         const trabajos = await respT.json();
+        const movimientos = await respM.json();
+        
         const tbody = document.querySelector('#tableClientes tbody');
         if (!tbody) return;
         
         tbody.innerHTML = '';
         clientes.forEach(cliente => {
-            // Calculamos un saldo rápido sumando deudas de trabajos (Precio - Señas)
-            const trabajosDelCliente = trabajos.filter(t => t.cliente_id === cliente.id);
-            const saldoAproximado = trabajosDelCliente.reduce((suma, t) => suma + (t.precio_venta - t.monto_abonado), 0);
-            const colorSaldo = saldoAproximado > 0 ? "var(--red)" : "var(--green)";
+            // Lógica unificada: Lo facturado menos lo pagado real
+            const trabajosCliente = trabajos.filter(t => t.cliente_id === cliente.id);
+            const movsCliente = movimientos.filter(m => m.cliente_id === cliente.id);
+            
+            const totalFacturado = trabajosCliente.reduce((suma, t) => suma + t.precio_venta, 0);
+            const totalPagado = movsCliente.filter(m => m.tipo === 'Pago').reduce((suma, m) => suma + m.monto, 0);
+            
+            const saldoReal = totalFacturado - totalPagado;
+            const colorSaldo = saldoReal > 0 ? "var(--red)" : "var(--green)";
 
-            // ACÁ ESTÁ ARREGLADA LA COLUMNA QUE FALTABA
             tbody.innerHTML += `
                 <tr class="client-row">
                   <td><b>${cliente.nombre_completo}</b></td>
                   <td>${cliente.nombre_empresa || '-'}</td>
                   <td class="tnum">${cliente.dni_cuit}</td>
-                  <td class="tnum" style="color: ${colorSaldo}; font-weight: 600;">$ ${saldoAproximado.toLocaleString('es-AR')}</td>
+                  <td class="tnum" style="color: ${colorSaldo}; font-weight: 600;">$ ${saldoReal.toLocaleString('es-AR')}</td>
                   <td>
                     <button class="btn secondary" style="font-size:12px; padding:6px 12px;" onclick="abrirFicha('${cliente.id}')">Ver Ficha</button>
                     <button class="btn" style="background:#25D366; padding:6px; margin-left:4px;" onclick="abrirWhatsApp('${cliente.telefono}')">WA</button>
@@ -390,22 +405,62 @@ async function guardarCliente(e) {
 // Guardar trabajo nuevo
 async function guardarTrabajo(e) {
     e.preventDefault();
+    const cliente_id = document.getElementById('ft_cliente_id').value;
+    const desc = document.getElementById('ft_descripcion').value;
+    const cant = parseInt(document.getElementById('ft_cantidad').value);
+    const notas = document.getElementById('ft_notas') ? document.getElementById('ft_notas').value.trim() : "";
+    
     const data = {
-        cliente_id: document.getElementById('ft_cliente_id').value,
-        descripcion_producto: document.getElementById('ft_descripcion').value,
-        cantidad: parseInt(document.getElementById('ft_cantidad').value),
+        cliente_id: cliente_id,
+        descripcion_producto: desc,
+        cantidad: cant,
         precio_venta: parseFloat(document.getElementById('ft_precio').value),
         costo_total_materiales: parseFloat(document.getElementById('ft_costo').value),
         forma_pago_heredada: document.getElementById('ft_pago').value,
-        notas_iniciales: document.getElementById('ft_notas') ? document.getElementById('ft_notas').value : null,
+        notas_iniciales: notas || null,
         fecha_creacion: new Date().toISOString().split('T')[0],
         estado: "Aprobado" 
     };
 
-    await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const resp = await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const nuevoTrabajo = await resp.json();
+    const shortId = nuevoTrabajo.id.substring(0,6).toUpperCase();
+
+    // 1. Guardar movimiento de creación en el historial
+    await fetch(`${API_URL}/movimientos/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            cliente_id: cliente_id,
+            trabajo_id: nuevoTrabajo.id,
+            monto: 0,
+            tipo: "Sistema",
+            metodo: "Sistema",
+            descripcion: `Ingreso de trabajo #${shortId}: ${cant}x ${desc}`
+        })
+    });
+
+    // 2. Si el usuario escribió una nota, la guardamos en la pestaña de Notas global
+    if (notas) {
+        await fetch(`${API_URL}/notas/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cliente_id: cliente_id,
+                trabajo_id: nuevoTrabajo.id,
+                texto: `Nota inicial (Trabajo #${shortId}): ${notas}`
+            })
+        });
+    }
+
     document.getElementById('form-trabajo').reset();
     toggleDrawer('drawer-nuevo-trabajo');
     cargarTrabajos(); 
+    
+    // Si justo tenías la ficha del cliente abierta, la recargamos
+    if (clienteActualFicha === cliente_id && document.getElementById('drawer-cliente').classList.contains('open')) {
+        abrirFicha(clienteActualFicha);
+    }
 }
 
 // Kanban y Drag & Drop
@@ -436,12 +491,26 @@ async function soltarTarjeta(ev, nuevoEstado) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ estado: nuevoEstado })
         });
-        
         if (!resp.ok) throw new Error("Backend rechazó el cambio");
 
-        cargarTrabajos();
+        // Acá disparamos el registro en Movimientos
+        const cliente_id = tarjeta.getAttribute('data-cliente');
+        const shortId = id.substring(0,6).toUpperCase();
         
-        // Magia visual: Si la ficha del cliente está abierta, la recargamos de fondo
+        await fetch(`${API_URL}/movimientos/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cliente_id: cliente_id,
+                trabajo_id: id,
+                monto: 0,
+                tipo: "Sistema",
+                metodo: "Sistema",
+                descripcion: `Estado actualizado a "${nuevoEstado}" (Trabajo #${shortId})`
+            })
+        });
+
+        cargarTrabajos();
         const drawerCliente = document.getElementById('drawer-cliente');
         if (clienteActualFicha && drawerCliente.classList.contains('open')) {
             abrirFicha(clienteActualFicha);
@@ -449,7 +518,6 @@ async function soltarTarjeta(ev, nuevoEstado) {
         
     } catch (error) {
         console.error("Error al actualizar estado:", error);
-        alert("No se pudo actualizar el estado en el servidor. Revisá la consola.");
     }
 }
 async function cargarTrabajos() {
@@ -469,9 +537,12 @@ async function cargarTrabajos() {
     trabajos.forEach(t => {
         const cliente = clientes.find(c => c.id === t.cliente_id);
         const bordeColor = t.estado === "En Diseño" ? "var(--magenta)" : (t.estado === "En Producción" ? "var(--amber)" : "transparent");
+        const shortId = t.id.substring(0,6).toUpperCase();
         
+        // Atento al data-cliente que agregamos acá
         const tarjetaHTML = `
-            <div class="kanban-card" id="card-${t.id}" draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')" style="border-left: 4px solid ${bordeColor}; cursor: grab;">
+            <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')" style="border-left: 4px solid ${bordeColor}; cursor: grab;">
+              <div style="font-size:10px; color:var(--muted); margin-bottom:2px;">#${shortId}</div>
               <div class="client">${cliente ? cliente.nombre_completo : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${t.descripcion_producto}</div>
               <div class="date">${t.fecha_creacion} - $${t.precio_venta}</div>
