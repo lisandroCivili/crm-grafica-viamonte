@@ -12,3 +12,7 @@ def crear_nota(nota: schemas.NotaCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(nuevo)
     return nuevo
+
+@router.get("/{cliente_id}", response_model=list[schemas.NotaResponse])
+def listar_notas(cliente_id: str, db: Session = Depends(get_db)):
+    return db.query(models.Nota).filter(models.Nota.cliente_id == cliente_id).order_by(models.Nota.fecha_creacion.desc()).all()
