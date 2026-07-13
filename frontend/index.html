@@ -83,7 +83,7 @@
       </div>
 
       <div class="kanban-board">
-        <div class="kanban-col">
+        <div class="kanban-col" id="col-pendiente">
           <h4>Pendiente / Aprobado <span>(2)</span></h4>
           <div class="kanban-card">
             <div class="client">Distribuidora Norte</div>
@@ -91,7 +91,7 @@
             <div class="date">Entrega: 14/07</div>
           </div>
         </div>
-        <div class="kanban-col" style="background:#e0d9f0;">
+        <div class="kanban-col" style="background:#e0d9f0;" id="col-diseno">
           <h4 style="color:var(--magenta-dark)">En Diseño <span>(1)</span></h4>
           <div class="kanban-card" style="border-left: 4px solid var(--magenta)">
             <div class="client">Gimnasio Tucumán Fit</div>
@@ -99,7 +99,7 @@
             <div class="date">Entrega: 12/07</div>
           </div>
         </div>
-        <div class="kanban-col" style="background:#f7eedb;">
+        <div class="kanban-col" style="background:#f7eedb;" id="col-produccion">
           <h4 style="color:var(--amber)">En Producción <span>(1)</span></h4>
           <div class="kanban-card" style="border-left: 4px solid var(--amber)">
             <div class="client">Pizzería Don Luis</div>
@@ -107,7 +107,7 @@
             <div class="date">Entrega: 11/07</div>
           </div>
         </div>
-        <div class="kanban-col" style="background:#dbf0e3;">
+        <div class="kanban-col" style="background:#dbf0e3;" id="col-entregado">
           <h4 style="color:var(--green)">Entregado <span>(1)</span></h4>
           <div class="kanban-card">
             <div class="client">Farmacia Central</div>
@@ -248,6 +248,71 @@
       <button class="btn" style="width:100%; margin-top:20px;">Guardar Presupuesto</button>
     </div>
 
+    <!-- DRAWER: NUEVO CLIENTE -->
+    <div id="drawer-nuevo-cliente" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-cliente')">✖</button>
+      <h3>Agregar Cliente Nuevo</h3>
+      <form id="form-cliente" onsubmit="guardarCliente(event)" style="margin-top: 20px;">
+        <div class="form-group">
+          <label>Nombre Completo *</label>
+          <input type="text" id="fc_nombre" required style="width: 250px; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>Empresa / Local</label>
+          <input type="text" id="fc_empresa" style="width: 250px; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>DNI o CUIT *</label>
+          <input type="text" id="fc_cuit" required style="width: 250px; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>Teléfono (WhatsApp) *</label>
+          <input type="text" id="fc_telefono" required style="width: 250px; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>Aviso recompra (Días)</label>
+          <input type="number" id="fc_recompra" placeholder="Ej: 45" style="width: 250px; text-align: left;">
+        </div>
+        <button type="submit" class="btn" style="width:100%; margin-top:20px;">Guardar Cliente</button>
+      </form>
+    </div>
+
+    <!-- DRAWER: NUEVO TRABAJO -->
+    <div id="drawer-nuevo-trabajo" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-trabajo')">✖</button>
+      <h3>Ingresar Trabajo al Taller</h3>
+      <form id="form-trabajo" onsubmit="guardarTrabajo(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Seleccionar Cliente *</label>
+          <select id="ft_cliente_id" required style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"></select>
+        </div>
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+          <label style="margin-bottom: 5px;">Descripción del Producto *</label>
+          <input type="text" id="ft_descripcion" required style="width: 100%; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>Cantidad *</label>
+          <input type="number" id="ft_cantidad" required>
+        </div>
+        <div class="form-group">
+          <label>Precio de Venta ($) *</label>
+          <input type="number" id="ft_precio" required>
+        </div>
+        <div class="form-group">
+          <label>Costo de Materiales ($) *</label>
+          <input type="number" id="ft_costo" required>
+        </div>
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+          <label style="margin-bottom: 5px;">Forma de Pago acordada</label>
+          <select id="ft_pago" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="Cheque">Cheque</option>
+          </select>
+        </div>
+        <button type="submit" class="btn" style="width:100%; margin-top:20px;">Enviar a Tablero</button>
+      </form>
+    </div>
   </main>
 
   <script src="app.js"></script>
