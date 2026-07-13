@@ -224,34 +224,47 @@ async function guardarEdicionTrabajo(e) {
     const id = document.getElementById('fe_trabajo_id').value;
     const razon = document.getElementById('fe_razon').value;
     const nuevoPrecio = parseFloat(document.getElementById('fe_precio').value);
+    const nuevaCantidad = parseInt(document.getElementById('fe_cantidad').value);
+    const nuevaDesc = document.getElementById('fe_descripcion').value;
 
-    // 1. Actualizamos el Trabajo
-    await fetch(`${API_URL}/trabajos/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            descripcion_producto: document.getElementById('fe_descripcion').value,
-            cantidad: parseInt(document.getElementById('fe_cantidad').value),
-            precio_venta: nuevoPrecio
-        })
-    });
+    try {
+        // 1. Actualizamos el Trabajo
+        await fetch(`${API_URL}/trabajos/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                descripcion_producto: nuevaDesc,
+                cantidad: nuevaCantidad,
+                precio_venta: nuevoPrecio
+            })
+        });
 
-    // 2. Guardamos el Movimiento para que quede en el historial
-    await fetch(`${API_URL}/movimientos/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            cliente_id: clienteActualFicha,
-            trabajo_id: id,
-            monto: 0,
-            tipo: "Edición",
-            descripcion: `Cambio en el trabajo: ${razon} (Nuevo precio: $${nuevoPrecio})`
-        })
-    });
+        // 2. Guardamos el Movimiento para que quede en el historial
+        const respMov = await fetch(`${API_URL}/movimientos/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cliente_id: clienteActualFicha,
+                trabajo_id: id,
+                monto: 0,
+                tipo: "Edición",
+                descripcion: `Cambio: ${razon} (${nuevaCantidad}x ${nuevaDesc} a $${nuevoPrecio})`
+            })
+        });
 
-    toggleDrawer('drawer-editar-trabajo');
-    abrirFicha(clienteActualFicha); // Refrescamos todo
-    cargarTrabajos(); // Refrescamos el kanban
+        if (!respMov.ok) {
+            const errorData = await respMov.json();
+            console.error("Fallo al guardar el historial:", errorData);
+            alert("El trabajo se editó, pero hubo un error al guardar el historial. Revisá la consola.");
+        }
+
+        toggleDrawer('drawer-editar-trabajo');
+        abrirFicha(clienteActualFicha); // Refrescamos todo
+        cargarTrabajos(); // Refrescamos el kanban
+
+    } catch (error) {
+        console.error("Error al editar trabajo:", error);
+    }
 }
 
 // ==========================================
@@ -263,24 +276,31 @@ async function cargarClientes(filtro = "") {
         let url = `${API_URL}/clientes/`;
         if (filtro) url += `?buscar=${filtro}`;
 
-        const [respC, respT, respM] = await Promise.all([
+        // Traemos clientes y trabajos
+        const [respC, respT] = await Promise.all([
             fetch(url),
-            fetch(`${API_URL}/trabajos/`),
-            fetch(`${API_URL}/movimientos/`) // Necesitamos un GET general de movimientos en el backend si lo queremos global, o resolvemos por cliente.
+            fetch(`${API_URL}/trabajos/`)
         ]);
         
-        // (Por simplicidad en la tabla global, la dejamos en cero hasta conectar el endpoint global o iterar)
         const clientes = await respC.json();
+        const trabajos = await respT.json();
         const tbody = document.querySelector('#tableClientes tbody');
         if (!tbody) return;
         
         tbody.innerHTML = '';
         clientes.forEach(cliente => {
+            // Calculamos un saldo rápido sumando deudas de trabajos (Precio - Señas)
+            const trabajosDelCliente = trabajos.filter(t => t.cliente_id === cliente.id);
+            const saldoAproximado = trabajosDelCliente.reduce((suma, t) => suma + (t.precio_venta - t.monto_abonado), 0);
+            const colorSaldo = saldoAproximado > 0 ? "var(--red)" : "var(--green)";
+
+            // ACÁ ESTÁ ARREGLADA LA COLUMNA QUE FALTABA
             tbody.innerHTML += `
                 <tr class="client-row">
                   <td><b>${cliente.nombre_completo}</b></td>
                   <td>${cliente.nombre_empresa || '-'}</td>
                   <td class="tnum">${cliente.dni_cuit}</td>
+                  <td class="tnum" style="color: ${colorSaldo}; font-weight: 600;">$ ${saldoAproximado.toLocaleString('es-AR')}</td>
                   <td>
                     <button class="btn secondary" style="font-size:12px; padding:6px 12px;" onclick="abrirFicha('${cliente.id}')">Ver Ficha</button>
                     <button class="btn" style="background:#25D366; padding:6px; margin-left:4px;" onclick="abrirWhatsApp('${cliente.telefono}')">WA</button>
@@ -288,7 +308,7 @@ async function cargarClientes(filtro = "") {
                 </tr>
             `;
         });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Error cargando clientes:", e); }
 }
 
 document.getElementById('clientSearch')?.addEventListener('keyup', (e) => {
