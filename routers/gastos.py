@@ -1,19 +1,28 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 
 router = APIRouter(prefix="/api/gastos", tags=["Gastos"])
 
+@router.get("/", response_model=list[schemas.GastoResponse])
+def listar_gastos(db: Session = Depends(get_db)):
+    # Los ordenamos del más nuevo al más viejo
+    return db.query(models.Gasto).order_by(models.Gasto.fecha.desc()).all()
+
 @router.post("/", response_model=schemas.GastoResponse)
-def registrar_gasto(gasto: schemas.GastoCreate, db: Session = Depends(get_db)):
+def crear_gasto(gasto: schemas.GastoCreate, db: Session = Depends(get_db)):
     nuevo_gasto = models.Gasto(**gasto.model_dump())
     db.add(nuevo_gasto)
     db.commit()
     db.refresh(nuevo_gasto)
     return nuevo_gasto
 
-@router.get("/", response_model=list[schemas.GastoResponse])
-def listar_gastos(db: Session = Depends(get_db)):
-    # Los traemos ordenados por fecha, del más reciente al más antiguo
-    return db.query(models.Gasto).order_by(models.Gasto.fecha.desc()).all()
+@router.delete("/{gasto_id}")
+def eliminar_gasto(gasto_id: str, db: Session = Depends(get_db)):
+    db_gasto = db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
+    if not db_gasto:
+        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+    db.delete(db_gasto)
+    db.commit()
+    return {"mensaje": "Gasto eliminado"}

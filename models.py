@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, Date, DateTime, ForeignKey, JSON, Text, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
@@ -75,3 +75,34 @@ class Presupuesto(Base):
     fecha_creacion = Column(Date, nullable=False)
 
     cliente = relationship("Cliente")
+
+class Gasto(Base):
+    __tablename__ = "gastos"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True) # <-- ESTO ES LO NUEVO
+    categoria = Column(String, nullable=False)
+    concepto = Column(String, nullable=False)
+    monto = Column(Float, nullable=False)
+    fecha = Column(Date, nullable=False)
+    metodo_pago = Column(String, default="Efectivo")     # <-- NUEVO
+    comprobante = Column(String, default="Sin comprobante") # <-- NUEVO
+
+class ArticuloStock(Base):
+    __tablename__ = "stock"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    nombre = Column(String, nullable=False)
+    categoria = Column(String, default="General")
+    proveedor = Column(String, nullable=True)
+    cantidad = Column(Float, default=0.0)
+    unidad = Column(String, default="unidades")
+    stock_minimo = Column(Float, default=5.0)
+    costo_unitario = Column(Float, default=0.0)
+    ultima_actualizacion = Column(Date, nullable=False)
+
+class HistorialStock(Base):
+    __tablename__ = "historial_stock"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    articulo_id = Column(String, ForeignKey("stock.id"), nullable=False)
+    diferencia = Column(Float, nullable=False) # Guardaremos +50 o -200
+    motivo = Column(String, nullable=False)
+    fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc)) # Para saber hasta la hora

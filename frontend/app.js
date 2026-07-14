@@ -64,6 +64,8 @@ function iniciarApp() {
     cargarTrabajos();
     cargarSelectorClientes();
     cargarPresupuestos();
+    cargarGastos();
+    cargarStock();
 }
 
 // ==========================================
@@ -913,4 +915,624 @@ async function generarPDFInterno(presupuesto_id) {
         <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $${p.precio_final.toLocaleString('es-AR')}</h3>
     `;
     html2pdf().set({ margin: 10, filename: `Costos_Internos_${shortId}.pdf` }).from(div).save();
+}
+
+// ==========================================
+// MÓDULO DE GASTOS
+// ==========================================
+
+// REEMPLAZAR abrirDrawerGasto
+async function abrirDrawerGasto() {
+    document.getElementById('form-gasto').reset();
+    document.getElementById('fg_fecha').value = new Date().toISOString().split('T')[0];
+    
+    try {
+        const respT = await fetch(`${API_URL}/trabajos/`);
+        if (respT.ok) {
+            const trabajos = await respT.json();
+            const selectT = document.getElementById('fg_trabajo_id');
+            selectT.innerHTML = '<option value="">Ninguno (Gasto general del taller)</option>';
+            
+            // Filtramos para mostrar solo los que están en proceso (Aprobados, en Diseño, etc.)
+            const activos = trabajos.filter(t => t.estado !== 'Entregado' && t.estado !== 'Cancelado').reverse();
+            activos.forEach(t => {
+                const shortId = t.id.substring(0,6).toUpperCase();
+                selectT.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto}</option>`;
+            });
+        }
+    } catch(e) { console.error(e); }
+
+    toggleDrawer('drawer-nuevo-gasto');
+}
+
+// REEMPLAZAR cargarGastos
+async function cargarGastos() {
+    try {
+        const resp = await fetch(`${API_URL}/gastos/`);
+        if (!resp.ok) return;
+        
+        let gastos = await resp.json();
+        
+        // 1. LEER LOS FILTROS
+        const filtroMes = document.getElementById('filtro-mes-gasto').value;
+        const filtroCat = document.getElementById('filtro-cat-gasto').value;
+
+        // 2. APLICAR FILTROS DE TIEMPO Y CATEGORÍA
+        const hoy = new Date();
+        const mesActual = hoy.getMonth();
+        const anioActual = hoy.getFullYear();
+
+        gastos = gastos.filter(g => {
+            // El truco de + 'T00:00:00' es para que no se desfase por la zona horaria argentina
+            const fechaG = new Date(g.fecha + 'T00:00:00'); 
+            
+            let pasaMes = true;
+            if (filtroMes === 'este_mes') {
+                pasaMes = (fechaG.getMonth() === mesActual && fechaG.getFullYear() === anioActual);
+            } else if (filtroMes === 'mes_pasado') {
+                let mesPasado = mesActual - 1;
+                let anioPasado = anioActual;
+                if (mesPasado < 0) { mesPasado = 11; anioPasado--; } // Si estamos en Enero, pasa a Diciembre del año anterior
+                pasaMes = (fechaG.getMonth() === mesPasado && fechaG.getFullYear() === anioPasado);
+            }
+
+            let pasaCat = true;
+            if (filtroCat !== 'todas') {
+                pasaCat = (g.categoria === filtroCat);
+            }
+
+            return pasaMes && pasaCat;
+        });
+
+        // 3. RENDERIZAR TABLA Y SUMAR TOTAL
+        const tbody = document.querySelector('#tableGastos tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+        let sumaTotal = 0;
+
+        if (gastos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--muted);">No hay gastos registrados para este filtro.</td></tr>';
+            document.getElementById('lbl-total-gastos').innerText = '$ 0';
+            return;
+        }
+
+        gastos.forEach(g => {
+            sumaTotal += g.monto; // Vamos sumando la plata
+
+            let colorCat = 'var(--ink)';
+            if(g.categoria === 'Insumos') colorCat = 'var(--blue)';
+            else if(g.categoria === 'Servicios') colorCat = 'var(--amber)';
+            else if(g.categoria === 'Sueldos') colorCat = 'var(--magenta)';
+
+            // Novedad: Etiqueta visual de asociación
+            let badgeTrabajo = '';
+            if (g.trabajo_id) {
+                const shortId = g.trabajo_id.substring(0,6).toUpperCase();
+                badgeTrabajo = `<span style="font-size:10px; background:var(--magenta-soft); color:var(--magenta); padding:2px 4px; border-radius:4px; margin-left:6px;">🔗 Trabajo #${shortId}</span>`;
+            }
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${new Date(g.fecha + 'T00:00:00').toLocaleDateString('es-AR')}</td>
+                    <td><span style="background:var(--paper); color:${colorCat}; font-weight:600; padding:4px 8px; border-radius:4px; font-size:12px;">${g.categoria}</span></td>
+                    <td>
+                        ${g.concepto} ${badgeTrabajo}<br>
+                        <span style="font-size:10px; color:var(--muted); display:inline-block; margin-top:4px;">
+                            💳 ${g.metodo_pago} | 🧾 ${g.comprobante}
+                        </span>
+                    </td>
+                    <td class="tnum" style="color:var(--red); font-weight:bold;">$ ${g.monto.toLocaleString('es-AR')}</td>
+                    <td style="text-align:center;">
+                        <button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarGasto('${g.id}')">🗑️ Borrar</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        // 4. ACTUALIZAR EL TOTAL EN PANTALLA
+        document.getElementById('lbl-total-gastos').innerText = `$ ${sumaTotal.toLocaleString('es-AR')}`;
+
+    } catch (e) {
+        console.error("Error cargando gastos:", e);
+    }
+}
+
+async function guardarGasto(e) {
+    e.preventDefault();
+    // REEMPLAZAR EL PAYLOAD EN guardarGasto
+    const tr_id = document.getElementById('fg_trabajo_id').value;
+    const payload = {
+        categoria: document.getElementById('fg_categoria').value,
+        concepto: document.getElementById('fg_concepto').value,
+        monto: parseFloat(document.getElementById('fg_monto').value),
+        fecha: document.getElementById('fg_fecha').value,
+        metodo_pago: document.getElementById('fg_metodo').value,
+        comprobante: document.getElementById('fg_comprobante').value,
+        trabajo_id: tr_id ? tr_id : null   // <-- Se manda si eligió algo
+    };
+
+    try {
+        const resp = await fetch(`${API_URL}/gastos/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (resp.ok) {
+            toggleDrawer('drawer-nuevo-gasto');
+            cargarGastos();
+            Swal.fire({ title: '¡Salida registrada!', icon: 'success', timer: 1500, showConfirmButton: false });
+        }
+    } catch (error) {
+        console.error("Error al guardar gasto:", error);
+    }
+}
+
+async function eliminarGasto(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Eliminar este gasto?',
+        text: "Va a desaparecer del balance mensual.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#555',
+        confirmButtonText: 'Sí, borrarlo',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        await fetch(`${API_URL}/gastos/${id}`, { method: 'DELETE' });
+        cargarGastos();
+        Swal.fire('¡Eliminado!', 'El gasto fue borrado del sistema.', 'success');
+    } catch (e) {
+        console.error("Error al eliminar gasto:", e);
+    }
+}
+
+// ==========================================
+// MÓDULO DE STOCK E INVENTARIO
+// ==========================================
+
+function abrirDrawerStock() {
+    document.getElementById('form-stock').reset();
+    toggleDrawer('drawer-nuevo-stock');
+}
+
+async function guardarArticuloStock(e) {
+    e.preventDefault();
+    const payload = {
+        nombre: document.getElementById('fs_nombre').value,
+        categoria: document.getElementById('fs_categoria').value,
+        proveedor: document.getElementById('fs_proveedor').value || null,
+        cantidad: parseFloat(document.getElementById('fs_cantidad').value),
+        unidad: document.getElementById('fs_unidad').value,
+        stock_minimo: parseFloat(document.getElementById('fs_minimo').value),
+        costo_unitario: parseFloat(document.getElementById('fs_costo').value),
+        ultima_actualizacion: new Date().toISOString().split('T')[0]
+    };
+
+    try {
+        const resp = await fetch(`${API_URL}/stock/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+            toggleDrawer('drawer-nuevo-stock');
+            cargarStock();
+            Swal.fire({ title: 'Guardado', icon: 'success', timer: 1000, showConfirmButton: false });
+        }
+    } catch (error) { console.error("Error guardando stock:", error); }
+}
+
+async function cargarStock() {
+    try {
+        const resp = await fetch(`${API_URL}/stock/`);
+        if (!resp.ok) return;
+        
+        const stock = await resp.json();
+        const tbody = document.querySelector('#tableStock tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+        let capitalTotal = 0;
+        let alertasTotales = 0;
+
+        if (stock.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--muted);">Inventario vacío.</td></tr>';
+            document.getElementById('lbl-valor-inventario').innerText = '$ 0';
+            document.getElementById('lbl-alertas-stock').innerText = '0';
+            return;
+        }
+
+        stock.forEach(s => {
+            // Cálculos para la cabecera
+            capitalTotal += (s.cantidad * s.costo_unitario);
+            const enAlerta = s.cantidad <= s.stock_minimo;
+            if (enAlerta) alertasTotales++;
+
+            // REEMPLAZAR DECLARACIÓN DE badgeEstado EN cargarStock()
+            let badgeEstado = enAlerta 
+                ? `<span style="background:var(--red); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">¡COMPRAR!</span>`
+                : `<span style="background:var(--green); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">Suficiente</span>`;
+            
+            // Le agregamos un botón de historial
+            badgeEstado += `<br><button class="btn secondary" style="font-size:10px; padding:2px 4px; margin-top:5px;" onclick="verHistorialStock('${s.id}', '${s.nombre}')">Ver Historial</button>`;
+
+            // EL SISTEMA HÍBRIDO DE CANTIDAD: Botones y tipeo manual
+            const controlCantidad = `
+                <div style="display:flex; align-items:center; justify-content:center; gap:5px;">
+                    <button class="btn secondary" style="padding:4px 8px; font-weight:bold;" onclick="ajustarStockRapido('${s.id}', ${s.cantidad}, -1, '${s.unidad}')">-</button>
+                    <input type="number" id="stk-input-${s.id}" value="${s.cantidad}" style="width:70px; text-align:center; padding:5px; border:1px solid var(--line); border-radius:4px;" onchange="ajustarStockRapido('${s.id}', ${s.cantidad}, 'manual', '${s.unidad}')">
+                    <button class="btn secondary" style="padding:4px 8px; font-weight:bold;" onclick="ajustarStockRapido('${s.id}', ${s.cantidad}, 1, '${s.unidad}')">+</button>
+                    <span style="font-size:11px; color:var(--muted);">${s.unidad}</span>
+                </div>
+            `;
+
+            tbody.innerHTML += `
+                <tr style="${enAlerta ? 'background-color: var(--red-soft);' : ''}">
+                    <td><b>${s.nombre}</b></td>
+                    <td>
+                        <span style="font-size:11px; color:var(--ink); font-weight:600;">${s.categoria}</span><br>
+                        <span style="font-size:11px; color:var(--muted);">🏭 ${s.proveedor || 'Sin proveedor'}</span>
+                    </td>
+                    <td class="tnum" style="text-align:center;">$ ${s.costo_unitario.toLocaleString('es-AR')}</td>
+                    <td style="text-align:center;">${controlCantidad}</td>
+                    <td style="text-align:center;">${badgeEstado}</td>
+                </tr>
+            `;
+        });
+
+        // Refrescar paneles
+        document.getElementById('lbl-valor-inventario').innerText = `$ ${capitalTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        document.getElementById('lbl-alertas-stock').innerText = alertasTotales;
+
+    } catch (e) { console.error("Error cargando stock:", e); }
+}
+
+// REEMPLAZAR ajustarStockRapido
+async function ajustarStockRapido(id, cantidadActual, accion, unidad) {
+    let nuevaCantidad;
+    let motivo = "Ajuste rápido";
+    
+    if (accion === 'manual') {
+        nuevaCantidad = parseFloat(document.getElementById(`stk-input-${id}`).value) || 0;
+        if (nuevaCantidad === cantidadActual) return; // No cambió nada
+        
+        // Si escribe a mano, le exigimos un motivo
+        const dif = nuevaCantidad - cantidadActual;
+        const textoDif = dif > 0 ? `Ingreso de +${dif}` : `Salida de ${dif}`;
+        
+        const { value: razon, isDismissed } = await Swal.fire({
+            title: 'Justificar movimiento',
+            text: `Estás haciendo un ${textoDif} ${unidad}. ¿Cuál es el motivo? (Ej: Compra, Uso en Trabajo #123, Rotura)`,
+            input: 'text',
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Guardar',
+            inputValidator: (value) => {
+                if (!value) return '¡Tenés que escribir un motivo!'
+            }
+        });
+
+        if (isDismissed) {
+            cargarStock(); // Volvemos el input al número que estaba
+            return; 
+        }
+        motivo = razon;
+    } else {
+        nuevaCantidad = cantidadActual + accion;
+        motivo = accion > 0 ? "Ajuste manual rápido (+1)" : "Ajuste manual rápido (-1)";
+    }
+
+    if (nuevaCantidad < 0) nuevaCantidad = 0;
+
+    try {
+        const resp = await fetch(`${API_URL}/stock/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cantidad: nuevaCantidad, motivo: motivo })
+        });
+
+        if (resp.ok) cargarStock();
+    } catch (e) { console.error("Error actualizando cantidad:", e); }
+}
+
+
+// NUEVA FUNCIÓN: Ver Historial (Pop-up lindo)
+async function verHistorialStock(id, nombreArticulo) {
+    try {
+        const resp = await fetch(`${API_URL}/stock/${id}/historial`);
+        const historial = await resp.json();
+        
+        if (historial.length === 0) {
+            Swal.fire('Historial', 'No hay movimientos registrados para este artículo.', 'info');
+            return;
+        }
+
+        let htmlLista = '<div style="max-height: 300px; overflow-y: auto; text-align: left;">';
+        htmlLista += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+        htmlLista += '<tr style="border-bottom: 1px solid #ddd; color: #666;"><th>Fecha</th><th>Movimiento</th><th>Motivo</th></tr>';
+        
+        historial.forEach(h => {
+            const fechaLocale = new Date(h.fecha).toLocaleString('es-AR', {dateStyle: 'short', timeStyle: 'short'});
+            const colorDif = h.diferencia > 0 ? 'var(--green)' : 'var(--red)';
+            const signo = h.diferencia > 0 ? '+' : '';
+            
+            htmlLista += `
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px 4px;">${fechaLocale}</td>
+                    <td style="padding: 8px 4px; color: ${colorDif}; font-weight: bold;">${signo}${h.diferencia}</td>
+                    <td style="padding: 8px 4px;">${h.motivo}</td>
+                </tr>
+            `;
+        });
+        htmlLista += '</table></div>';
+
+        Swal.fire({
+            title: `Historial: ${nombreArticulo}`,
+            html: htmlLista,
+            width: 600,
+            confirmButtonColor: '#D5006D',
+            confirmButtonText: 'Cerrar'
+        });
+
+    } catch(e) { console.error("Error trayendo historial:", e); }
+}
+
+// ==========================================
+// MÓDULO DASHBOARD Y ESTADÍSTICAS
+// ==========================================
+
+let miChartFlujo = null;
+let miChartDistribucion = null;
+
+async function cargarDashboard() {
+    try {
+        // 1. Traemos toda la info de la base de datos
+        const [respT, respG] = await Promise.all([
+            fetch(`${API_URL}/trabajos/`),
+            fetch(`${API_URL}/gastos/`)
+        ]);
+        
+        let trabajos = await respT.json();
+        let gastos = await respG.json();
+
+        // 2. Leemos la "Máquina del tiempo"
+        const filtro = document.getElementById('dash-filtro-tiempo').value;
+        const hoy = new Date();
+        const mesActual = hoy.getMonth();
+        const anioActual = hoy.getFullYear();
+
+        // Funciones de ayuda para filtrar por fecha
+        const cumpleFiltro = (fechaStr) => {
+            if (filtro === 'historico') return true;
+            const f = new Date(fechaStr + 'T00:00:00');
+            if (filtro === 'este_mes') return f.getMonth() === mesActual && f.getFullYear() === anioActual;
+            if (filtro === 'mes_pasado') {
+                let m = mesActual - 1; let a = anioActual;
+                if (m < 0) { m = 11; a--; }
+                return f.getMonth() === m && f.getFullYear() === a;
+            }
+            if (filtro === 'este_anio') return f.getFullYear() === anioActual;
+            return true;
+        };
+
+        // Aplicamos el filtro a las listas
+        const trabajosFiltrados = trabajos.filter(t => cumpleFiltro(t.fecha_creacion));
+        const gastosFiltrados = gastos.filter(g => cumpleFiltro(g.fecha));
+
+        let totalIngresos = 0;
+        let plataEnLaCalle = 0;
+        let plataEstancada = 0;
+        let htmlMorosos = '';
+        
+        trabajosFiltrados.forEach(t => {
+            if (t.estado !== 'Cancelado') {
+                totalIngresos += t.precio_venta;
+                
+                // Si el trabajo está dando vueltas en el taller, es plata estancada
+                if (t.estado === 'Aprobado' || t.estado === 'En Diseño' || t.estado === 'En Producción') {
+                    plataEstancada += t.precio_venta;
+                }
+
+                // Plata en la calle y Semáforo de Morosos
+                if (t.estado === 'Entregado') {
+                    plataEnLaCalle += t.precio_venta;
+                    
+                    const shortId = t.id.substring(0,6).toUpperCase();
+                    htmlMorosos += `
+                        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
+                            <span><b>#${shortId}</b> - ${t.descripcion_producto}</span>
+                            <span style="color:var(--red); font-weight:bold;">$ ${t.precio_venta.toLocaleString('es-AR')}</span>
+                        </div>
+                    `;
+                }
+            }
+        });
+
+        let totalEgresos = 0;
+        let gastosPorCat = {};
+        gastosFiltrados.forEach(g => {
+            totalEgresos += g.monto;
+            gastosPorCat[g.categoria] = (gastosPorCat[g.categoria] || 0) + g.monto;
+        });
+
+        const gananciaNeta = totalIngresos - totalEgresos;
+
+        // Actualizamos los números en pantalla
+        document.getElementById('kpi-ingresos').innerText = `$ ${totalIngresos.toLocaleString('es-AR')}`;
+        document.getElementById('kpi-egresos').innerText = `$ ${totalEgresos.toLocaleString('es-AR')}`;
+        document.getElementById('kpi-ganancia').innerText = `$ ${gananciaNeta.toLocaleString('es-AR')}`;
+        document.getElementById('kpi-calle').innerText = `$ ${plataEnLaCalle.toLocaleString('es-AR')}`;
+        // Abajo de donde actualizás kpi-calle, sumá estas dos líneas:
+        document.getElementById('alerta-estancada').innerText = `$ ${plataEstancada.toLocaleString('es-AR')}`;
+        document.getElementById('lista-morosos').innerHTML = htmlMorosos || '<div style="color:var(--green); font-weight:bold; margin-top:10px;">¡No hay morosos! 🎉 Todos los entregados están pagados.</div>';
+
+        // Color dinámico para la ganancia
+        document.getElementById('kpi-ganancia').style.color = gananciaNeta >= 0 ? 'var(--magenta)' : 'var(--red)';
+
+        // 4. CÁLCULO DE BLOQUE 2 (GRÁFICOS)
+        dibujarGraficoDistribucion(gastosPorCat);
+        
+        // Para el gráfico de barras armamos el flujo anual (Agrupamos por mes)
+        dibujarGraficoFlujo(trabajos, gastos, anioActual);
+
+    } catch (e) {
+        console.error("Error cargando dashboard:", e);
+    }
+}
+
+function dibujarGraficoDistribucion(gastosPorCat) {
+    const ctx = document.getElementById('chartDistribucion').getContext('2d');
+    if (miChartDistribucion) miChartDistribucion.destroy(); // Borra el anterior si existía
+
+    const etiquetas = Object.keys(gastosPorCat);
+    const valores = Object.values(gastosPorCat);
+
+    miChartDistribucion = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: etiquetas,
+            datasets: [{
+                data: valores,
+                backgroundColor: ['#D5006D', '#FFC107', '#007BFF', '#28A745', '#6C757D'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 } } }
+            }
+        }
+    });
+}
+
+function dibujarGraficoFlujo(trabajos, gastos, anio) {
+    const ctx = document.getElementById('chartFlujo').getContext('2d');
+    if (miChartFlujo) miChartFlujo.destroy();
+
+    // Arrays para los 12 meses
+    const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    let ingresosMes = new Array(12).fill(0);
+    let egresosMes = new Array(12).fill(0);
+
+    trabajos.forEach(t => {
+        if (t.estado !== 'Cancelado') {
+            const f = new Date(t.fecha_creacion + 'T00:00:00');
+            if (f.getFullYear() === anio) ingresosMes[f.getMonth()] += t.precio_venta;
+        }
+    });
+
+    gastos.forEach(g => {
+        const f = new Date(g.fecha + 'T00:00:00');
+        if (f.getFullYear() === anio) egresosMes[f.getMonth()] += g.monto;
+    });
+
+    miChartFlujo = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: meses,
+            datasets: [
+                {
+                    label: 'Ingresos Facturados',
+                    data: ingresosMes,
+                    backgroundColor: '#28A745',
+                    borderRadius: 4
+                },
+                {
+                    label: 'Gastos y Egresos',
+                    data: egresosMes,
+                    backgroundColor: '#DC3545',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, ticks: { callback: function(value) { return '$' + value.toLocaleString('es-AR'); } } }
+            },
+            plugins: {
+                legend: { position: 'top' }
+            }
+        }
+    });
+}
+
+async function generarPDFEjecutivo() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    // Capturamos los datos filtrados directamente desde la pantalla
+    const selector = document.getElementById('dash-filtro-tiempo');
+    const periodo = selector.options[selector.selectedIndex].text;
+    
+    const ingresos = document.getElementById('kpi-ingresos').innerText;
+    const egresos = document.getElementById('kpi-egresos').innerText;
+    const ganancia = document.getElementById('kpi-ganancia').innerText;
+    const calle = document.getElementById('kpi-calle').innerText;
+    const taller = document.getElementById('alerta-estancada').innerText;
+
+    // --- ENCABEZADO FORMAL ---
+    doc.setFontSize(24);
+    doc.setTextColor(213, 0, 109); // Color Magenta corporativo
+    doc.text("Gráfica Viamonte", 14, 22);
+    
+    doc.setFontSize(14);
+    doc.setTextColor(50, 50, 50);
+    doc.text("Reporte Ejecutivo de Resultados", 14, 32);
+    
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Período analizado: ${periodo}`, 14, 42);
+    doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-AR')}`, 14, 48);
+
+    // --- TABLA DE RESULTADOS PRINCIPALES ---
+    doc.autoTable({
+        startY: 55,
+        head: [['Concepto Financiero', 'Monto Registrado']],
+        body: [
+            ['Total Ingresos (Facturación)', ingresos],
+            ['Total Egresos (Gastos Operativos)', egresos],
+            ['Ganancia Neta del Período', ganancia]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [40, 40, 40], fontSize: 12 },
+        bodyStyles: { fontSize: 12, textColor: [50, 50, 50] },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        columnStyles: {
+            0: { fontStyle: 'bold' },
+            1: { halign: 'right', fontStyle: 'bold' }
+        }
+    });
+
+    // --- TABLA DE ESTADO Y ALERTA ---
+    doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 15,
+        head: [['Indicadores de Producción y Riesgo', 'Capital Involucrado']],
+        body: [
+            ['Capital estancado en taller (En producción)', taller],
+            ['Cuentas por cobrar (Trabajos entregados)', calle]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [213, 0, 109], fontSize: 11 }, // Cabecera magenta para alertas
+        bodyStyles: { fontSize: 11 },
+        columnStyles: {
+            0: { fontStyle: 'bold' },
+            1: { halign: 'right', textColor: [200, 0, 0], fontStyle: 'bold' }
+        }
+    });
+
+    // --- PIE DE PÁGINA ---
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Documento generado automáticamente por el sistema de gestión CRM Viamonte.", 14, 280);
+
+    // Descarga del archivo
+    doc.save(`Reporte_Directorio_${periodo.replace(/ /g, '_')}.pdf`);
 }

@@ -153,3 +153,52 @@ class NotaResponse(NotaCreate):
     id: str
     fecha_creacion: datetime
     model_config = {"from_attributes": True}
+
+class GastoBase(BaseModel):
+    categoria: str
+    concepto: str
+    monto: float
+    fecha: date
+    metodo_pago: str = "Efectivo"
+    comprobante: str = "Sin comprobante"
+    trabajo_id: Optional[str] = None # <-- ESTO ES LO NUEVO
+
+class GastoCreate(GastoBase):
+    pass
+
+class GastoResponse(GastoBase):
+    id: str
+    model_config = {"from_attributes": True}
+
+class StockBase(BaseModel):
+    nombre: str
+    categoria: Optional[str] = "General"
+    proveedor: Optional[str] = None
+    cantidad: float
+    unidad: str
+    stock_minimo: float
+    costo_unitario: float
+    ultima_actualizacion: date
+
+class StockCreate(StockBase):
+    pass
+
+# Buscá StockUpdate y reemplazalo:
+class StockUpdate(BaseModel):
+    cantidad: Optional[float] = None
+    costo_unitario: Optional[float] = None
+    ultima_actualizacion: Optional[date] = None
+    motivo: Optional[str] = "Ajuste rápido" # <-- NUEVO
+
+class StockResponse(StockBase):
+    id: str
+    model_config = {"from_attributes": True}
+
+# Agregá esto al final del archivo:
+class HistorialStockResponse(BaseModel):
+    id: str
+    articulo_id: str
+    diferencia: float
+    motivo: str
+    fecha: datetime
+    model_config = {"from_attributes": True}
