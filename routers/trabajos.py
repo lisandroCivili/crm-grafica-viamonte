@@ -35,6 +35,12 @@ def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, d
     # MAGIA: Si el estado pasa a Diseño o Producción, clavamos la fecha de hoy
     if trabajo_update.estado in ["En Diseño", "En Producción"] and not db_trabajo.fecha_comienzo:
         db_trabajo.fecha_comienzo = date.today()
+        
+    # <-- AGREGAR ESTO: Sincronizar el estado con su Presupuesto madre
+    if trabajo_update.estado:
+        db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
+        if db_presupuesto:
+            db_presupuesto.estado = trabajo_update.estado
 
     db.commit()
     db.refresh(db_trabajo)

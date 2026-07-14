@@ -62,14 +62,16 @@ class Presupuesto(Base):
     __tablename__ = "presupuestos"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True) # Para sincronizar estado
+    version_de = Column(String, ForeignKey("presupuestos.id"), nullable=True) # Para el historial de duplicados
     descripcion = Column(String, nullable=False)
     cantidad = Column(Integer, nullable=False)
-    costo_materiales = Column(Float, nullable=False) # Será el Subtotal
-    detalles_costos = Column(JSON, nullable=True) # <-- ACÁ GUARDAMOS LA LISTA
+    costo_materiales = Column(Float, nullable=False)
+    detalles_costos = Column(JSON, nullable=True)
     margen_ganancia = Column(Float, nullable=False)
     precio_final = Column(Float, nullable=False)
     estado = Column(String, default="Borrador")
-    convertido_a_trabajo = Column(Boolean, default=False) # <-- BLOQUEO DE BOTÓN
+    convertido_a_trabajo = Column(Boolean, default=False)
     fecha_creacion = Column(Date, nullable=False)
 
     cliente = relationship("Cliente")

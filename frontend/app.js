@@ -521,6 +521,7 @@ async function soltarTarjeta(ev, nuevoEstado) {
         console.error("Error al actualizar estado:", error);
     }
 }
+// REEMPLAZAR cargarTrabajos
 async function cargarTrabajos() {
     const [trabajos, clientes] = await Promise.all([
         (await fetch(`${API_URL}/trabajos/`)).json(),
@@ -536,19 +537,22 @@ async function cargarTrabajos() {
     Object.values(cols).forEach(col => { if(col) col.innerHTML = col.firstElementChild.outerHTML; });
 
     trabajos.forEach(t => {
+        // FILTRO BARRERA: Si está cancelado, ni lo miramos para el Kanban
+        if (t.estado === "Cancelado") return;
+
         const cliente = clientes.find(c => c.id === t.cliente_id);
         const bordeColor = t.estado === "En Diseño" ? "var(--magenta)" : (t.estado === "En Producción" ? "var(--amber)" : "transparent");
         const shortId = t.id.substring(0,6).toUpperCase();
         
-        // Atento al data-cliente que agregamos acá
         const tarjetaHTML = `
             <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')" style="border-left: 4px solid ${bordeColor}; cursor: grab;">
               <div style="font-size:10px; color:var(--muted); margin-bottom:2px;">#${shortId}</div>
               <div class="client">${cliente ? cliente.nombre_completo : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${t.descripcion_producto}</div>
-              <div class="date">${t.fecha_creacion} - $${t.precio_venta}</div>
+              <div class="date">${t.fecha_creacion} - $${t.precio_venta.toLocaleString('es-AR')}</div>
             </div>
         `;
+        
         if (cols[t.estado]) cols[t.estado].innerHTML += tarjetaHTML;
         else if (cols["Aprobado"]) cols["Aprobado"].innerHTML += tarjetaHTML;
     });
@@ -590,20 +594,18 @@ function cargarDashboard() {
 
 const LISTA_COSTOS = ["Papel", "Troquel", "Luz", "Diseño", "Chapas", "Impresión", "Barniz / Laminado", "Cordón de bolsas", "Troquelado", "Tinta", "Pegado y armado", "Empaquetado / Flete", "Corte / Encuadernación", "Gastos otros"];
 
-async function abrirDrawerPresupuesto() { // Mantenemos el nombre de la función para el botón original
+let idPresupuestoVersionDe = null; // Para saber si estamos editando uno viejo
+
+// Reemplazá abrirDrawerPresupuesto
+async function abrirDrawerPresupuesto() {
+    idPresupuestoVersionDe = null; // Reseteamos por si era nuevo
     document.getElementById('modal-presupuesto').classList.remove('hidden');
-    document.getElementById('lbl-pres-id').innerText = `Nº 0001-${Math.floor(1000 + Math.random() * 9000)}`;
+    document.getElementById('lbl-pres-id').innerHTML = `Nº 0001-${Math.floor(1000 + Math.random() * 9000)}`;
     
-    // Inyectar los inputs de costos
     const cont = document.getElementById('contenedor-costos');
     cont.innerHTML = '';
     LISTA_COSTOS.forEach(c => {
-        cont.innerHTML += `
-            <div class="costo-row">
-                <label>${c}</label>
-                <input type="number" class="input-costo" data-nombre="${c}" value="0" oninput="calcularModal()" onfocus="if(this.value=='0')this.value=''">
-            </div>
-        `;
+        cont.innerHTML += `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${c}" value="0" oninput="calcularModal()" onfocus="if(this.value=='0')this.value=''"></div>`;
     });
 
     try {
@@ -641,18 +643,44 @@ function calcularModal() {
     document.getElementById('lbl-m-unidad').innerText = `$ ${unidad.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 }
 
+// AGREGAR ESTA FUNCIÓN NUEVA
+async function duplicarPresupuesto(id) {
+    try {
+        const respP = await fetch(`${API_URL}/presupuestos/`);
+        const p = (await respP.json()).find(x => x.id === id);
+        if (!p) return;
+
+        await abrirDrawerPresupuesto(); // Prepara el modal limpio
+        
+        idPresupuestoVersionDe = id; // Clavamos la relación
+        document.getElementById('lbl-pres-id').innerHTML = `Nº 0001-... <span style="color:var(--magenta); font-size:12px;">(Versión de #${id.substring(0,6).toUpperCase()})</span>`;
+        
+        // Rellenamos
+        document.getElementById('mp_cliente_id').value = p.cliente_id;
+        document.getElementById('mp_descripcion').value = p.descripcion;
+        document.getElementById('mp_cantidad').value = p.cantidad;
+        document.getElementById('mp_margen').value = p.margen_ganancia;
+        document.getElementById('mp_estado').value = "Borrador";
+
+        // Rellenamos los costos específicos
+        document.querySelectorAll('.input-costo').forEach(input => {
+            const nombre = input.getAttribute('data-nombre');
+            if (p.detalles_costos && p.detalles_costos[nombre]) {
+                input.value = p.detalles_costos[nombre];
+            }
+        });
+        calcularModal();
+    } catch (e) { console.error(e); }
+}
+
+// REEMPLAZAR guardarPresupuestoModerno (Agrega la version)
 async function guardarPresupuestoModerno(e) {
     e.preventDefault();
-    
     const inputs = document.querySelectorAll('.input-costo');
-    let detalles = {};
-    let subtotal = 0;
+    let detalles = {}; let subtotal = 0;
     inputs.forEach(i => {
         const val = parseFloat(i.value) || 0;
-        if (val > 0) {
-            detalles[i.getAttribute('data-nombre')] = val;
-            subtotal += val;
-        }
+        if (val > 0) { detalles[i.getAttribute('data-nombre')] = val; subtotal += val; }
     });
 
     const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
@@ -660,6 +688,7 @@ async function guardarPresupuestoModerno(e) {
 
     const payload = {
         cliente_id: document.getElementById('mp_cliente_id').value,
+        version_de: idPresupuestoVersionDe, // <-- ACÁ VIAJA LA RELACIÓN
         descripcion: document.getElementById('mp_descripcion').value,
         cantidad: parseInt(document.getElementById('mp_cantidad').value),
         costo_materiales: subtotal,
@@ -678,6 +707,7 @@ async function guardarPresupuestoModerno(e) {
     } catch (e) { console.error(e); }
 }
 
+// REEMPLAZAR cargarPresupuestos
 async function cargarPresupuestos() {
     try {
         const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
@@ -692,21 +722,42 @@ async function cargarPresupuestos() {
         presupuestos.reverse().forEach(p => {
             const cliente = clientes.find(c => c.id === p.cliente_id);
             const nombreCliente = cliente ? cliente.nombre_completo : 'Desconocido';
+            const shortId = p.id.substring(0,6).toUpperCase(); // ID DEL NUEVO
+            
+            // Lógica de Vencimiento
+            const diasPasados = Math.floor((new Date() - new Date(p.fecha_creacion)) / (1000 * 60 * 60 * 24));
+            let estadoBadge = `<span style="background:var(--paper); padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">${p.estado}</span>`;
+            
+            if ((p.estado === 'Borrador' || p.estado === 'Enviado') && diasPasados >= 15) {
+                estadoBadge += `<br><span style="background:var(--red); color:white; padding:2px 6px; border-radius:4px; font-size:10px; display:inline-block; margin-top:4px;">⚠️ Vencido</span>`;
+            }
+
+            // Lógica de Relación (Versión de...)
+            let versionBadge = '';
+            if (p.version_de) {
+                versionBadge = `<br><span style="font-size:10px; background:var(--magenta-soft); color:var(--magenta); padding:2px 4px; border-radius:4px; display:inline-block; margin-top:4px;">Versión de #${p.version_de.substring(0,6).toUpperCase()}</span>`;
+            }
+
             const btnConvertir = p.convertido_a_trabajo 
-                ? `<button class="btn secondary" disabled style="font-size:12px; padding:6px; opacity:0.5; cursor:not-allowed;">Ya es Trabajo</button>`
-                : `<button class="btn secondary" style="font-size:12px; padding:6px;" onclick="convertirATrabajo('${p.id}')">A Trabajo</button>`;
+                ? `<button class="btn secondary" disabled style="font-size:12px; padding:6px; opacity:0.5;">Ya es Trabajo</button>`
+                : `<button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--green); color:var(--green);" onclick="convertirATrabajo('${p.id}')">A Trabajo</button>`;
 
             tbody.innerHTML += `
                 <tr>
                     <td>${p.fecha_creacion}</td>
                     <td><b>${nombreCliente}</b></td>
-                    <td>${p.cantidad}x ${p.descripcion}</td>
+                    <td>
+                        <span style="font-size:11px; color:var(--muted);">#${shortId}</span><br>
+                        ${p.cantidad}x ${p.descripcion} 
+                        ${versionBadge}
+                    </td>
                     <td class="tnum" style="color:var(--magenta); font-weight:bold;">$ ${p.precio_final.toLocaleString('es-AR')}</td>
-                    <td><span style="background:var(--paper); padding:4px 8px; border-radius:4px; font-size:12px;">${p.estado}</span></td>
-                    <td style="display:flex; gap:5px;">
+                    <td>${estadoBadge}</td>
+                    <td style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
                         ${btnConvertir}
-                        <button class="btn" style="font-size:12px; padding:6px; background:var(--ink);" onclick="generarPDFInterno('${p.id}')">PDF Interno</button>
-                        <button class="btn" style="font-size:12px; padding:6px; background:var(--blue);" onclick="generarPDFCliente('${p.id}')">PDF Cliente</button>
+                        <button class="btn secondary" style="font-size:12px; padding:6px;" onclick="duplicarPresupuesto('${p.id}')">Duplicar</button>
+                        <button class="btn" style="font-size:12px; padding:6px; background:var(--ink);" onclick="generarPDFInterno('${p.id}')">PDF Int</button>
+                        <button class="btn" style="font-size:12px; padding:6px; background:var(--blue);" onclick="generarPDFCliente('${p.id}')">PDF Cli</button>
                     </td>
                 </tr>
             `;
@@ -714,25 +765,51 @@ async function cargarPresupuestos() {
     } catch (e) { console.error(e); }
 }
 
+// REEMPLAZAR convertirATrabajo en app.js
 async function convertirATrabajo(presupuesto_id) {
-    // Usamos el modal lindo de SweetAlert
-    const confirmacion = await Swal.fire({
-        title: '¿Pasar a Trabajo?',
-        text: "Esto enviará el presupuesto al Kanban de producción.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#D5006D',
-        cancelButtonColor: '#555',
-        confirmButtonText: 'Sí, enviar a Taller',
-        cancelButtonText: 'Cancelar'
-    });
-
-    if (!confirmacion.isConfirmed) return;
-
     try {
         const respP = await fetch(`${API_URL}/presupuestos/`);
-        const p = (await respP.json()).find(x => x.id === presupuesto_id);
+        const presupuestos = await respP.json();
+        const p = presupuestos.find(x => x.id === presupuesto_id);
 
+        // LÓGICA DE DUPLICADOS: Si es versión de otro, preguntamos qué hacer
+        let cancelarAnterior = false;
+        if (p.version_de) {
+            const madre = presupuestos.find(x => x.id === p.version_de);
+            
+            // Si el presupuesto madre ya se había convertido a trabajo, hay conflicto
+            if (madre && madre.trabajo_id) {
+                const accion = await Swal.fire({
+                    title: 'Presupuesto Duplicado',
+                    text: 'Este presupuesto es una corrección/versión de otro anterior. ¿Qué hacemos con el trabajo original?',
+                    icon: 'question',
+                    showDenyButton: true,
+                    showCancelButton: true,
+                    confirmButtonText: 'Cancelar el anterior',
+                    denyButtonText: 'Mantener ambos',
+                    cancelButtonText: 'Abortar',
+                    confirmButtonColor: '#D5006D',
+                    denyButtonColor: '#555'
+                });
+
+                if (accion.isDismissed) return; // Tocó cancelar/afuera, abortamos todo
+                if (accion.isConfirmed) cancelarAnterior = true; // Tocó "Cancelar el anterior"
+            }
+        } else {
+            // Si es un presupuesto normal, hacemos la pregunta estándar
+            const confirmacion = await Swal.fire({
+                title: '¿Pasar a Trabajo?',
+                text: "Esto enviará el presupuesto al Kanban de producción.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#D5006D',
+                cancelButtonColor: '#555',
+                confirmButtonText: 'Sí, enviar a Taller'
+            });
+            if (!confirmacion.isConfirmed) return;
+        }
+
+        // 1. Creamos el nuevo trabajo
         const dataTrabajo = {
             cliente_id: p.cliente_id,
             descripcion_producto: p.descripcion,
@@ -744,13 +821,42 @@ async function convertirATrabajo(presupuesto_id) {
             estado: "Aprobado"
         };
 
-        await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataTrabajo) });
-        // Marcamos como convertido en DB
-        await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir`, { method: 'PUT' });
+        const respT = await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataTrabajo) });
+        const nuevoTrabajo = await respT.json();
+        
+        // 2. Conectamos el presupuesto al nuevo ID del trabajo
+        await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir/${nuevoTrabajo.id}`, { method: 'PUT' });
+
+        // 3. Ejecutamos la cancelación del viejo si el usuario lo pidió
+        if (cancelarAnterior) {
+            const madre = presupuestos.find(x => x.id === p.version_de);
+            
+            // Cambiamos el estado del trabajo viejo a "Cancelado"
+            await fetch(`${API_URL}/trabajos/${madre.trabajo_id}`, { 
+                method: 'PUT', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ estado: "Cancelado" }) 
+            });
+
+            // Registramos el movimiento para la trazabilidad
+            await fetch(`${API_URL}/movimientos/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cliente_id: p.cliente_id,
+                    trabajo_id: madre.trabajo_id,
+                    monto: 0,
+                    tipo: "Sistema",
+                    metodo: "Sistema",
+                    descripcion: `Trabajo cancelado por corrección (Reemplazado por Pres. #${p.id.substring(0,6).toUpperCase()})`
+                })
+            });
+        }
         
         cargarTrabajos();
         cargarPresupuestos();
         Swal.fire('¡Enviado!', 'El trabajo ya está en el tablero.', 'success');
+        
     } catch (e) { console.error(e); }
 }
 

@@ -56,6 +56,8 @@ class TrabajoResponse(TrabajoBase):
 # --- ESQUEMAS PARA PRESUPUESTOS ---
 class PresupuestoBase(BaseModel):
     cliente_id: str
+    trabajo_id: Optional[str] = None
+    version_de: Optional[str] = None
     descripcion: str
     cantidad: int
     costo_materiales: float

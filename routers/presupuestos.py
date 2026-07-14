@@ -35,13 +35,15 @@ def listar_presupuestos(db: Session = Depends(get_db)):
     return db.query(models.Presupuesto).all()
 
 # (Abajo de la ruta POST y GET que ya tenías)
-@router.put("/{presupuesto_id}/convertir", response_model=schemas.PresupuestoResponse)
-def marcar_convertido(presupuesto_id: str, db: Session = Depends(get_db)):
+# Reemplazá el PUT anterior por este:
+@router.put("/{presupuesto_id}/convertir/{trabajo_id}", response_model=schemas.PresupuestoResponse)
+def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depends(get_db)):
     db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
     if not db_presupuesto:
         raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
     
     db_presupuesto.convertido_a_trabajo = True
+    db_presupuesto.trabajo_id = trabajo_id
     db_presupuesto.estado = "Aprobado"
     db.commit()
     db.refresh(db_presupuesto)
