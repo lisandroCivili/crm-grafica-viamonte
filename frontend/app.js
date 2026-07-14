@@ -1,64 +1,59 @@
 const API_URL = 'http://localhost:8000/api';
-
 let clienteActualFicha = null; // Guardamos qué cliente está abierto
 
 // ==========================================
-// 1. INICIALIZACIÓN Y LOGIN
+// CONTROL DE ACCESO (SIMPLE)
 // ==========================================
-// ==========================================
-// 1. INICIALIZACIÓN Y LOGIN (Persistente)
-// ==========================================
-
-// Ni bien carga la página, revisamos si ya hay una sesión guardada
-// Ni bien carga la página, revisamos sesión y pestaña
-document.addEventListener('DOMContentLoaded', () => {
-    const estaLogueado = localStorage.getItem('viamonte_auth');
-    if (estaLogueado === 'true') {
-        document.getElementById('login-screen').classList.add('hidden');
+document.addEventListener("DOMContentLoaded", () => {
+    // Si no está la variable de sesión activa en el navegador, mostramos el telón
+    if (localStorage.getItem('viamonte_sesion') !== 'activa') {
+        document.getElementById('login-overlay').style.display = 'flex';
+    } else {
+        // Si ya está activa, bajamos el telón y arrancamos la app normal
+        document.getElementById('login-overlay').style.display = 'none';
         iniciarApp();
         
         // Recuperamos la última pestaña en la que estábamos
         const lastTab = localStorage.getItem('viamonte_last_tab') || 'tab-dashboard';
         const tabBoton = document.querySelector(`[onclick*="${lastTab}"]`);
-        switchTab(lastTab, tabBoton);
+        if (tabBoton) switchTab(lastTab, tabBoton);
     }
 });
 
-// Evento del formulario de Login
-document.getElementById('login-form').addEventListener('submit', async (e) => {
+async function hacerLogin(e) {
     e.preventDefault();
-    const user = document.getElementById('login-user').value;
-    const pass = document.getElementById('login-pass').value;
+    const u = document.getElementById('login-user').value;
+    const p = document.getElementById('login-pass').value;
 
     try {
-        const response = await fetch(`${API_URL}/login`, {
+        const resp = await fetch(`${API_URL}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usuario: user, contrasenia: pass })
+            body: JSON.stringify({ usuario: u, password: p })
         });
         
-        if (response.ok) {
-            // Guardamos el token en el navegador
-            localStorage.setItem('viamonte_auth', 'true');
-            
-            document.getElementById('login-error').style.display = 'none';
-            document.getElementById('login-screen').classList.add('hidden');
-            iniciarApp();
+        if (resp.ok) {
+            // Guardamos la llavecita simple en el navegador
+            localStorage.setItem('viamonte_sesion', 'activa');
+            document.getElementById('login-overlay').style.display = 'none';
+            iniciarApp(); // Cargamos la base de datos recién ahora
         } else {
-            document.getElementById('login-error').style.display = 'block';
+            Swal.fire('Error', 'Usuario o contraseña incorrectos', 'error');
         }
-    } catch (error) {
-        console.error("Error crítico:", error);
+    } catch(e) {
+        console.error("Error en login", e);
     }
-});
-
-// Función para salir
-function cerrarSesion() {
-    // Borramos el token y recargamos la página
-    localStorage.removeItem('viamonte_auth');
-    window.location.reload();
 }
 
+function cerrarSesion() {
+    localStorage.removeItem('viamonte_sesion');
+    // Recargar la página es la forma más limpia de resetear todo y volver a mostrar el login
+    location.reload(); 
+}
+
+// ==========================================
+// INICIO Y CARGA DE MÓDULOS
+// ==========================================
 function iniciarApp() {
     cargarClientes();
     cargarDashboard();

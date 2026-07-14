@@ -24,9 +24,21 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    
+    <!-- PANTALLA DE LOGIN (TELÓN) -->
+    <div id="login-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f0f2f5; z-index: 9999; display: flex; justify-content: center; align-items: center;">
+      <div style="background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 350px; text-align: center;">
+          <h1 style="color: var(--magenta); margin-bottom: 5px;">Gráfica Viamonte</h1>
+          <div style="color: var(--muted); margin-bottom: 30px; font-size: 14px;">Acceso restringido</div>
+          
+          <form id="form-login" onsubmit="hacerLogin(event)">
+              <input type="text" id="login-user" placeholder="Usuario" required style="width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <input type="password" id="login-pass" placeholder="Contraseña" required style="width: 100%; padding: 12px; margin-bottom: 25px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <button type="submit" class="btn" style="width: 100%; background: var(--ink); padding: 12px; font-size: 16px;">Ingresar al sistema</button>
+          </form>
+      </div>
+    </div>
     <!-- PANTALLA DE LOGIN HARDCODEADO -->
-    <div id="login-screen">
+    <!-- <div id="login-screen">
       <div class="login-box">
         <h2>Gráfica Viamonte</h2>
         <p style="color: var(--muted); margin-top: -10px; margin-bottom: 20px">
@@ -56,7 +68,7 @@
           Usuario o clave incorrectos.
         </div>
       </div>
-    </div>
+    </div> -->
 
     <!-- SIDEBAR -->
     <aside id="sidebar">

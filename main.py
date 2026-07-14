@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from database import engine
 # Importamos todos los routers modulares que creamos
-from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas
+from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
@@ -36,6 +36,7 @@ app.include_router(gastos.router)
 app.include_router(cheques.router)
 app.include_router(notas.router)
 app.include_router(movimientos.router)
+app.include_router(auth.router)  # Incluimos el router de autenticación
 
 # Modelo de validación para el Login sencillo
 class LoginRequest(BaseModel):
