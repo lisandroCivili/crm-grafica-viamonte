@@ -4,8 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from database import engine
+from fastapi import Depends
 # Importamos todos los routers modulares que creamos
-from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas
+from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth
+from security import verificar_token
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
@@ -26,15 +28,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registro de los Routers en la aplicación principal
-app.include_router(clientes.router)
-app.include_router(trabajos.router)
-app.include_router(presupuestos.router)
-app.include_router(cheques.router)
-app.include_router(gastos.router)
-app.include_router(stock.router)
-app.include_router(movimientos.router)
-app.include_router(notas.router)
+# 1. El de Auth NO lleva protección (si no, no pueden iniciar sesión)
+app.include_router(auth.router)
+
+# 2. A todos los demás les clavamos el patovica en la puerta
+app.include_router(clientes.router, dependencies=[Depends(verificar_token)])
+app.include_router(presupuestos.router, dependencies=[Depends(verificar_token)])
+app.include_router(trabajos.router, dependencies=[Depends(verificar_token)])
+app.include_router(stock.router, dependencies=[Depends(verificar_token)])
+app.include_router(gastos.router, dependencies=[Depends(verificar_token)])
+app.include_router(cheques.router, dependencies=[Depends(verificar_token)])
+app.include_router(notas.router, dependencies=[Depends(verificar_token)])
+app.include_router(movimientos.router, dependencies=[Depends(verificar_token)])
 
 # Modelo de validación para el Login sencillo
 class LoginRequest(BaseModel):

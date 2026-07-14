@@ -1,4 +1,80 @@
 const API_URL = 'http://localhost:8000/api';
+// ==========================================
+// SEGURIDAD Y LOGIN (INTERCEPTOR)
+// ==========================================
+
+const originalFetch = window.fetch;
+window.fetch = async (...args) => {
+    let [resource, config] = args;
+    
+    // Si la petición va a nuestra API y NO es la ruta de login, le inyectamos el token
+    if (typeof resource === 'string' && resource.startsWith(API_URL) && !resource.includes('/auth/login')) {
+        config = config || {};
+        config.headers = config.headers || {};
+        const token = localStorage.getItem('viamonte_token');
+        
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
+    }
+    
+    const response = await originalFetch(resource, config);
+    
+    // Si el backend nos rebota (Error 401), cerramos la sesión y mostramos la pantalla
+    if (response.status === 401) {
+        cerrarSesion();
+    }
+    return response;
+};
+
+async function hacerLogin(e) {
+    e.preventDefault();
+    const u = document.getElementById('login-user').value;
+    const p = document.getElementById('login-pass').value;
+    
+    // FastAPI requiere que los datos viajen como Formulario URL Encoded
+    const formData = new URLSearchParams();
+    formData.append('username', u);
+    formData.append('password', p);
+
+    try {
+        const resp = await originalFetch(`${API_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+        });
+        
+        if (resp.ok) {
+            const data = await resp.json();
+            localStorage.setItem('viamonte_token', data.access_token);
+            document.getElementById('login-overlay').style.display = 'none';
+            // Recargamos los datos ahora que tenemos permiso
+            iniciarApp();
+        } else {
+            Swal.fire('Error', 'Usuario o contraseña incorrectos', 'error');
+        }
+    } catch(e) {
+        console.error("Error en login", e);
+    }
+}
+
+function cerrarSesion() {
+    localStorage.removeItem('viamonte_token');
+    document.getElementById('login-overlay').style.display = 'flex';
+}
+
+// ==========================================
+// CONTROL DE INICIO
+// ==========================================
+// Reemplazá tu DOMContentLoaded actual por este:
+document.addEventListener("DOMContentLoaded", () => {
+    if (!localStorage.getItem('viamonte_token')) {
+        document.getElementById('login-overlay').style.display = 'flex';
+    } else {
+        document.getElementById('login-overlay').style.display = 'none';
+        iniciarApp();
+    }
+});
 let clienteActualFicha = null; // Guardamos qué cliente está abierto
 
 // ==========================================
@@ -66,6 +142,7 @@ function iniciarApp() {
     cargarPresupuestos();
     cargarGastos();
     cargarStock();
+    cargarCheques();
 }
 
 // ==========================================
@@ -1293,13 +1370,43 @@ let miChartDistribucion = null;
 async function cargarDashboard() {
     try {
         // 1. Traemos toda la info de la base de datos
-        const [respT, respG] = await Promise.all([
+        const [respT, respG, respC, respCl] = await Promise.all([
             fetch(`${API_URL}/trabajos/`),
-            fetch(`${API_URL}/gastos/`)
+            fetch(`${API_URL}/gastos/`),
+            fetch(`${API_URL}/cheques/`),       // <-- NUEVO
+            fetch(`${API_URL}/clientes/`)       // <-- NUEVO
         ]);
         
         let trabajos = await respT.json();
         let gastos = await respG.json();
+        let cheques = await respC.json();
+        let clientes = await respCl.json();
+
+        // LOGICA DE CHEQUES
+        let plataEnCheques = 0;
+        let htmlAlertasCheques = '';
+        const hoyMs = new Date().getTime();
+        const limiteMs = hoyMs + (7 * 24 * 60 * 60 * 1000); // 7 días para adelante
+
+        cheques.forEach(ch => {
+            if (ch.estado === 'En Cartera') {
+                plataEnCheques += ch.monto;
+                
+                const fechaCobroDate = new Date(ch.fecha_cobro + 'T00:00:00');
+                if (fechaCobroDate.getTime() <= limiteMs) {
+                    const cli = clientes.find(c => c.id === ch.cliente_id);
+                    const nomCli = cli ? (cli.nombre_completo || cli.nombre || 'Desc.') : 'Desc.';
+                    const esVencido = fechaCobroDate.getTime() < hoyMs ? 'color:var(--red);' : '';
+                    
+                    htmlAlertasCheques += `
+                        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
+                            <span style="${esVencido}">📅 ${fechaCobroDate.toLocaleDateString('es-AR')} - ${nomCli}</span>
+                            <span style="font-weight:bold;">$ ${ch.monto.toLocaleString('es-AR')}</span>
+                        </div>
+                    `;
+                }
+            }
+        });
 
         // 2. Leemos la "Máquina del tiempo"
         const filtro = document.getElementById('dash-filtro-tiempo').value;
@@ -1371,6 +1478,9 @@ async function cargarDashboard() {
         // Abajo de donde actualizás kpi-calle, sumá estas dos líneas:
         document.getElementById('alerta-estancada').innerText = `$ ${plataEstancada.toLocaleString('es-AR')}`;
         document.getElementById('lista-morosos').innerHTML = htmlMorosos || '<div style="color:var(--green); font-weight:bold; margin-top:10px;">¡No hay morosos! 🎉 Todos los entregados están pagados.</div>';
+        // Abajo, donde actualizabas los demás KPIs, agregá estos dos:
+        document.getElementById('kpi-cheques').innerText = `$ ${plataEnCheques.toLocaleString('es-AR')}`;
+        document.getElementById('alerta-cheques').innerHTML = htmlAlertasCheques || '<div style="color:var(--muted); margin-top:10px;">No hay cheques por vencer esta semana.</div>';
 
         // Color dinámico para la ganancia
         document.getElementById('kpi-ganancia').style.color = gananciaNeta >= 0 ? 'var(--magenta)' : 'var(--red)';
@@ -1535,4 +1645,159 @@ async function generarPDFEjecutivo() {
 
     // Descarga del archivo
     doc.save(`Reporte_Directorio_${periodo.replace(/ /g, '_')}.pdf`);
+}
+
+// ==========================================
+// MÓDULO DE CHEQUES
+// ==========================================
+
+async function abrirDrawerCheque() {
+    document.getElementById('form-cheque').reset();
+    document.getElementById('fch_emision').value = new Date().toISOString().split('T')[0];
+    
+    // Cargar clientes en el select
+    try {
+        const resp = await fetch(`${API_URL}/clientes/`);
+        if (resp.ok) {
+            const clientes = await resp.json();
+            const select = document.getElementById('fch_cliente');
+            select.innerHTML = '<option value="">Seleccionar Cliente...</option>';
+            clientes.forEach(c => {
+                select.innerHTML += `<option value="${c.id}">${c.nombre_completo || c.nombre || 'Sin nombre'}</option>`;
+            });
+        }
+    } catch(e) { console.error(e); }
+
+    toggleDrawer('drawer-nuevo-cheque');
+}
+
+async function cargarCheques() {
+    try {
+        const [respC, respCl] = await Promise.all([
+            fetch(`${API_URL}/cheques/`),
+            fetch(`${API_URL}/clientes/`)
+        ]);
+        
+        if (!respC.ok) return;
+        const cheques = await respC.json();
+        const clientes = await respCl.json();
+        
+        const tbody = document.querySelector('#tableCheques tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        if (cheques.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--muted);">No hay cheques registrados.</td></tr>';
+            return;
+        }
+
+        cheques.forEach(ch => {
+            const cliente = clientes.find(c => c.id === ch.cliente_id);
+            const nombreCliente = cliente ? (cliente.nombre_completo || cliente.nombre || 'Desconocido') : 'Desconocido';
+            
+            // Colores por estado
+            let badgeEstado = '';
+            if (ch.estado === 'En Cartera') badgeEstado = `<span style="background:var(--green); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">🟢 En Cartera</span>`;
+            else if (ch.estado === 'Depositado') badgeEstado = `<span style="background:var(--muted); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">🔵 Depositado</span>`;
+            else if (ch.estado === 'Endosado') badgeEstado = `<span style="background:var(--magenta); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">🟣 Endosado a: ${ch.destinatario_endoso}</span>`;
+            else if (ch.estado === 'Rechazado') badgeEstado = `<span style="background:var(--red); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">🔴 Rechazado</span>`;
+
+            // Formato de fechas
+            const fechaCobro = new Date(ch.fecha_cobro + 'T00:00:00');
+            const esUrgente = ch.estado === 'En Cartera' && fechaCobro <= new Date() ? 'color:var(--red); font-weight:bold;' : '';
+
+            tbody.innerHTML += `
+                <tr>
+                    <td style="${esUrgente}">${fechaCobro.toLocaleDateString('es-AR')}</td>
+                    <td><b>${ch.banco}</b><br><span style="font-size:11px; color:var(--muted);">N° ${ch.numero}</span></td>
+                    <td>${nombreCliente}</td>
+                    <td class="tnum" style="color:var(--ink); font-weight:bold;">$ ${ch.monto.toLocaleString('es-AR')}</td>
+                    <td style="text-align:center;">${badgeEstado}</td>
+                    <td style="text-align:center;">
+                        <button class="btn secondary" style="font-size:12px; padding:6px;" onclick="cambiarEstadoCheque('${ch.id}', '${ch.estado}')">🔄 Estado</button>
+                        <button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarCheque('${ch.id}')">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (e) { console.error("Error cargando cheques:", e); }
+}
+
+async function guardarCheque(e) {
+    e.preventDefault();
+    const payload = {
+        cliente_id: document.getElementById('fch_cliente').value,
+        banco: document.getElementById('fch_banco').value,
+        numero: document.getElementById('fch_numero').value,
+        monto: parseFloat(document.getElementById('fch_monto').value),
+        fecha_emision: document.getElementById('fch_emision').value,
+        fecha_cobro: document.getElementById('fch_cobro').value,
+        estado: "En Cartera"
+    };
+
+    try {
+        const resp = await fetch(`${API_URL}/cheques/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+            toggleDrawer('drawer-nuevo-cheque');
+            cargarCheques();
+            if (typeof cargarDashboard === "function") cargarDashboard(); // Refresca dashboard
+            Swal.fire({ title: 'Cheque registrado', icon: 'success', timer: 1500, showConfirmButton: false });
+        }
+    } catch (error) { console.error(error); }
+}
+
+async function cambiarEstadoCheque(id, estadoActual) {
+    const { value: nuevoEstado } = await Swal.fire({
+        title: 'Actualizar Estado',
+        input: 'select',
+        inputOptions: {
+            'En Cartera': '🟢 En Cartera',
+            'Depositado': '🔵 Depositado / Cobrado',
+            'Endosado': '🟣 Endosado a Proveedor',
+            'Rechazado': '🔴 Rechazado'
+        },
+        inputValue: estadoActual,
+        showCancelButton: true,
+        confirmButtonColor: '#D5006D',
+        confirmButtonText: 'Guardar'
+    });
+
+    if (!nuevoEstado || nuevoEstado === estadoActual) return;
+
+    let destinatario = null;
+    if (nuevoEstado === 'Endosado') {
+        const { value: prov } = await Swal.fire({
+            title: '¿A qué proveedor se lo entregaste?',
+            input: 'text',
+            inputValidator: (value) => { if (!value) return 'Tenés que ingresar un nombre' }
+        });
+        if (!prov) return;
+        destinatario = prov;
+    }
+
+    try {
+        await fetch(`${API_URL}/cheques/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: nuevoEstado, destinatario_endoso: destinatario })
+        });
+        cargarCheques();
+        if (typeof cargarDashboard === "function") cargarDashboard();
+    } catch (e) { console.error(e); }
+}
+
+async function eliminarCheque(id) {
+    const conf = await Swal.fire({
+        title: '¿Eliminar cheque?', icon: 'warning', showCancelButton: true,
+        confirmButtonColor: '#d33', confirmButtonText: 'Sí, borrar'
+    });
+    if (conf.isConfirmed) {
+        await fetch(`${API_URL}/cheques/${id}`, { method: 'DELETE' });
+        cargarCheques();
+        if (typeof cargarDashboard === "function") cargarDashboard();
+    }
 }

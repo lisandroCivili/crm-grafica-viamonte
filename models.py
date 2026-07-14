@@ -106,3 +106,15 @@ class HistorialStock(Base):
     diferencia = Column(Float, nullable=False) # Guardaremos +50 o -200
     motivo = Column(String, nullable=False)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc)) # Para saber hasta la hora
+
+class Cheque(Base):
+    __tablename__ = "cheques"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=True)
+    banco = Column(String, nullable=False)
+    numero = Column(String, nullable=False)
+    monto = Column(Float, nullable=False)
+    fecha_emision = Column(Date, nullable=False)
+    fecha_cobro = Column(Date, nullable=False)
+    estado = Column(String, default="En Cartera") # En Cartera, Depositado, Endosado, Rechazado
+    destinatario_endoso = Column(String, nullable=True)

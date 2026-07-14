@@ -24,6 +24,19 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <!-- PANTALLA DE LOGIN -->
+    <div id="login-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f0f2f5; z-index: 9999; display: flex; justify-content: center; align-items: center;">
+      <div style="background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 350px; text-align: center;">
+          <h1 style="color: var(--magenta); margin-bottom: 5px;">Gráfica Viamonte</h1>
+          <div style="color: var(--muted); margin-bottom: 30px; font-size: 14px;">Acceso restringido</div>
+          
+          <form id="form-login" onsubmit="hacerLogin(event)">
+              <input type="text" id="login-user" placeholder="Usuario" required style="width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <input type="password" id="login-pass" placeholder="Contraseña" required style="width: 100%; padding: 12px; margin-bottom: 25px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <button type="submit" class="btn" style="width: 100%; background: var(--ink); padding: 12px; font-size: 16px;">Ingresar al sistema</button>
+          </form>
+      </div>
+    </div>
     <!-- PANTALLA DE LOGIN HARDCODEADO -->
     <div id="login-screen">
       <div class="login-box">
@@ -70,12 +83,42 @@
         <div class="nav-item" onclick="switchTab('tab-stock', this)">📦 Stock</div>
         
         <!-- Botón de Cerrar Sesión -->
-        <div class="nav-item" style="margin-top: auto; color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
+        <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+        <a href="#" class="nav-link" style="color: #ff6b6b;" onclick="cerrarSesion()">🚪 Cerrar Sesión</a>
+      </div>
       </nav>
     </aside>
 
     <!-- CONTENIDO PRINCIPAL -->
     <main id="main">
+      <!-- MÓDULO DE CHEQUES -->
+    <section id="tab-cheques" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Cartera de Cheques</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Control de valores diferidos, cobros y endosos</div>
+        </div>
+        <button class="btn" style="background: var(--ink);" onclick="abrirDrawerCheque()">+ Ingresar Cheque</button>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tableCheques">
+          <thead>
+            <tr>
+              <th>Fecha Cobro</th>
+              <th>Banco y N°</th>
+              <th>Cliente</th>
+              <th class="tnum">Monto ($)</th>
+              <th style="text-align:center;">Estado</th>
+              <th style="text-align:center;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="6" style="text-align:center; color:var(--muted);">Cargando cheques...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
       <!-- DASHBOARD -->
       <!-- DASHBOARD PRINCIPAL -->
     <section id="tab-dashboard" class="view-section active">
@@ -97,7 +140,7 @@
       </div>
 
       <!-- BLOQUE 1: KPIs (TARJETAS VITALES) -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 25px;">
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-top: 25px;">
         
         <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
           <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Ingresos (Facturado)</div>
@@ -119,6 +162,12 @@
           <div id="kpi-calle" style="font-size: 26px; font-weight: bold; color: var(--amber); margin-top: 5px;">$ 0</div>
         </div>
 
+        <!-- Tarjeta de Cheques -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Cheques en Cartera</div>
+          <div id="kpi-cheques" style="font-size: 26px; font-weight: bold; color: var(--ink); margin-top: 5px;">$ 0</div>
+        </div>
+
       </div>
 
       <!-- BLOQUE 2: GRÁFICOS -->
@@ -136,7 +185,7 @@
         </div>
       </div>
       <!-- BLOQUE 3: ALERTAS Y SEMÁFOROS -->
-      <div style="margin-top: 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div style="margin-top: 25px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
         
         <!-- Plata Estancada (Taller) -->
         <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--amber); border-left: 5px solid var(--amber);">
@@ -152,6 +201,12 @@
           <div id="lista-morosos" style="max-height: 120px; overflow-y: auto; font-size: 13px;">
             <!-- Se llena con JS -->
           </div>
+        </div>
+
+        <!-- Cheques a Depositar -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid #17a2b8; border-left: 5px solid #17a2b8;">
+          <h3 style="font-size: 14px; margin-bottom: 10px; color: #17a2b8;">🏦 Cheques a Depositar (Próx. 7 días)</h3>
+          <div id="alerta-cheques" style="max-height: 120px; overflow-y: auto; font-size: 13px;"></div>
         </div>
       </div>
     </section>
@@ -1010,6 +1065,49 @@
         </div>
 
         <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--red);">Confirmar Gasto</button>
+      </form>
+    </div>
+    <!-- DRAWER: NUEVO CHEQUE -->
+    <div id="drawer-nuevo-cheque" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-cheque')">✖</button>
+      <h3>Ingresar Nuevo Cheque</h3>
+      
+      <form id="form-cheque" onsubmit="guardarCheque(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Cliente (Emisor) *</label>
+          <select id="fch_cliente" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <!-- Se llena con JS -->
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Banco *</label>
+            <input type="text" id="fch_banco" placeholder="Ej: Galicia" required style="width: 100%; padding: 10px;">
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">N° de Cheque *</label>
+            <input type="text" id="fch_numero" required style="width: 100%; padding: 10px;">
+          </div>
+        </div>
+
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px; color: var(--magenta);">Monto ($) *</label>
+          <input type="number" id="fch_monto" step="0.01" required style="width: 100%; padding: 10px;">
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Fecha Emisión *</label>
+            <input type="date" id="fch_emision" required style="width: 100%; padding: 10px;">
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px; color: var(--red);">Fecha de Cobro *</label>
+            <input type="date" id="fch_cobro" required style="width: 100%; padding: 10px;" title="Día en que se puede depositar">
+          </div>
+        </div>
+
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--ink);">Guardar Cheque</button>
       </form>
     </div>
     </main>

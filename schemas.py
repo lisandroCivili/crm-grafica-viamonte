@@ -202,3 +202,24 @@ class HistorialStockResponse(BaseModel):
     motivo: str
     fecha: datetime
     model_config = {"from_attributes": True}
+
+class ChequeBase(BaseModel):
+    cliente_id: Optional[str] = None
+    banco: str
+    numero: str
+    monto: float
+    fecha_emision: date
+    fecha_cobro: date
+    estado: str = "En Cartera"
+    destinatario_endoso: Optional[str] = None
+
+class ChequeCreate(ChequeBase):
+    pass
+
+class ChequeUpdate(BaseModel):
+    estado: Optional[str] = None
+    destinatario_endoso: Optional[str] = None
+
+class ChequeResponse(ChequeBase):
+    id: str
+    model_config = {"from_attributes": True}
