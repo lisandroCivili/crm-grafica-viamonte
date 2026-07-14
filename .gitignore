@@ -4,6 +4,8 @@ __pycache__/
 
 # SQLite
 *.db
+*.sqlite
+viamonte.db
 
 # Entornos virtuales
 venv/

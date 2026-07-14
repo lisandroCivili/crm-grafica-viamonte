@@ -14,6 +14,7 @@
     <!-- Librerías Externas (Gráficos y PDF) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- Hoja de Estilos -->
     <link rel="stylesheet" href="style.css" />
@@ -160,17 +161,35 @@
       </section>
 
       <!-- PRESUPUESTOS -->
-      <section id="tab-presupuestos" class="view-section">
-        <div class="topbar">
+      <!-- PRESUPUESTOS (Cotizador) -->
+    <section id="tab-presupuestos" class="view-section">
+      <div class="topbar">
+        <div>
           <h1>Presupuestos</h1>
-          <button class="btn" onclick="toggleDrawer('drawer-presupuesto')">
-            + Nuevo Presupuesto
-          </button>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Cotizador y generador de PDFs</div>
         </div>
-        <div class="panel">
-          <p>Listado de presupuestos emitidos...</p>
-        </div>
-      </section>
+        <button class="btn" onclick="abrirDrawerPresupuesto()">+ Nuevo Presupuesto</button>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tablePresupuestos">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Cliente</th>
+              <th>Detalle</th>
+              <th class="tnum">Total ($)</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Los presupuestos se inyectan acá con JS -->
+            <tr><td colspan="6" style="text-align:center; color:var(--muted);">Cargando presupuestos...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
       <!-- CLIENTES (LISTADO + BUSCADOR) -->
       <section id="tab-clientes" class="view-section">
@@ -676,6 +695,76 @@
         
         <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--green);">Confirmar Pago</button>
       </form>
+    </div>
+
+    <!-- DRAWER: NUEVO PRESUPUESTO -->
+    <!-- MODAL CENTRAL: NUEVO PRESUPUESTO -->
+    <div id="modal-presupuesto" class="modal-overlay hidden">
+        <div class="modal-content" style="width: 550px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">Nuevo presupuesto <span style="color:var(--muted); font-weight:normal; font-size:14px;" id="lbl-pres-id">Nº 0001-XXXX</span></h3>
+                <button onclick="cerrarModalPresupuesto()" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted);">✖</button>
+            </div>
+            
+            <form id="form-presupuesto" onsubmit="guardarPresupuestoModerno(event)">
+                <div style="display:flex; gap:15px; margin-bottom: 15px;">
+                    <div style="flex:1;">
+                        <label style="font-size:12px; color:var(--muted);">Producto</label>
+                        <input type="text" id="mp_descripcion" placeholder="Ej: Bolsas de papel" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px; color:var(--muted);">Cliente (Empresa)</label>
+                        <select id="mp_cliente_id" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"></select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="font-size:12px; color:var(--muted);">Cantidad</label>
+                    <input type="number" id="mp_cantidad" value="1" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
+                </div>
+
+                <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">Costos (dejá vacío lo que no aplique)</p>
+                <div id="contenedor-costos" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom: 20px;">
+                    <!-- Se inyectan los inputs de costos por JS -->
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="font-size:12px; color:var(--muted);">% de ganancia</label>
+                    <input type="number" id="mp_margen" placeholder="Ej: 35" value="100" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
+                </div>
+
+                <div style="margin-bottom: 25px;">
+                    <label style="font-size:12px; color:var(--muted);">Estado</label>
+                    <select id="mp_estado" style="width:100%; padding:10px; border:2px solid var(--magenta); border-radius:6px; font-weight:bold; color:var(--magenta);">
+                        <option value="Borrador">Borrador</option>
+                        <option value="Enviado">Enviado</option>
+                        <option value="Aprobado">Aprobado</option>
+                        <option value="Rechazado">Rechazado</option>
+                    </select>
+                </div>
+
+                <!-- Resumen Fijo -->
+                <div style="background: var(--magenta-soft); padding: 15px; border-radius: 8px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:14px; color:var(--ink);">
+                        <span>Sub total</span> <span id="lbl-m-subtotal">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:14px; color:var(--ink);">
+                        <span id="lbl-m-txt-ganancia">0% de ganancia</span> <span id="lbl-m-ganancia">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:16px; font-weight:bold; color:var(--magenta);">
+                        <span>Precio Total Trabajo</span> <span id="lbl-m-total">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:14px; color:var(--magenta);">
+                        <span>Precio por unidad</span> <span id="lbl-m-unidad">$0</span>
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                    <button type="button" class="btn secondary" onclick="cerrarModalPresupuesto()">Cancelar</button>
+                    <button type="submit" class="btn">Guardar</button>
+                </div>
+            </form>
+        </div>
     </div>
     </main>
 

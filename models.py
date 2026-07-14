@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, Date, DateTime, ForeignKey, JSON, Text
+from sqlalchemy import Column, String, Integer, Float, Date, DateTime, ForeignKey, JSON, Text, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -57,3 +57,19 @@ class Nota(Base):
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
 
     trabajo = relationship("Trabajo", back_populates="notas")
+
+class Presupuesto(Base):
+    __tablename__ = "presupuestos"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
+    descripcion = Column(String, nullable=False)
+    cantidad = Column(Integer, nullable=False)
+    costo_materiales = Column(Float, nullable=False) # Será el Subtotal
+    detalles_costos = Column(JSON, nullable=True) # <-- ACÁ GUARDAMOS LA LISTA
+    margen_ganancia = Column(Float, nullable=False)
+    precio_final = Column(Float, nullable=False)
+    estado = Column(String, default="Borrador")
+    convertido_a_trabajo = Column(Boolean, default=False) # <-- BLOQUEO DE BOTÓN
+    fecha_creacion = Column(Date, nullable=False)
+
+    cliente = relationship("Cliente")

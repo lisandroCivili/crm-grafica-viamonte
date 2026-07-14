@@ -63,6 +63,7 @@ function iniciarApp() {
     cargarDashboard();
     cargarTrabajos();
     cargarSelectorClientes();
+    cargarPresupuestos();
 }
 
 // ==========================================
@@ -581,4 +582,229 @@ function cargarDashboard() {
         ]
       }
     });
+}
+
+// ==========================================
+// MÓDULO DE PRESUPUESTOS AVANZADO
+// ==========================================
+
+const LISTA_COSTOS = ["Papel", "Troquel", "Luz", "Diseño", "Chapas", "Impresión", "Barniz / Laminado", "Cordón de bolsas", "Troquelado", "Tinta", "Pegado y armado", "Empaquetado / Flete", "Corte / Encuadernación", "Gastos otros"];
+
+async function abrirDrawerPresupuesto() { // Mantenemos el nombre de la función para el botón original
+    document.getElementById('modal-presupuesto').classList.remove('hidden');
+    document.getElementById('lbl-pres-id').innerText = `Nº 0001-${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    // Inyectar los inputs de costos
+    const cont = document.getElementById('contenedor-costos');
+    cont.innerHTML = '';
+    LISTA_COSTOS.forEach(c => {
+        cont.innerHTML += `
+            <div class="costo-row">
+                <label>${c}</label>
+                <input type="number" class="input-costo" data-nombre="${c}" value="0" oninput="calcularModal()" onfocus="if(this.value=='0')this.value=''">
+            </div>
+        `;
+    });
+
+    try {
+        const resp = await fetch(`${API_URL}/clientes/`);
+        const clientes = await resp.json();
+        const select = document.getElementById('mp_cliente_id');
+        select.innerHTML = '<option value="">Seleccione...</option>';
+        clientes.forEach(c => select.innerHTML += `<option value="${c.id}">${c.nombre_completo}</option>`);
+    } catch (e) { console.error(e); }
+    
+    calcularModal();
+}
+
+function cerrarModalPresupuesto() {
+    document.getElementById('modal-presupuesto').classList.add('hidden');
+    document.getElementById('form-presupuesto').reset();
+}
+
+function calcularModal() {
+    const inputs = document.querySelectorAll('.input-costo');
+    let subtotal = 0;
+    inputs.forEach(i => subtotal += (parseFloat(i.value) || 0));
+    
+    const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
+    const cantidad = parseInt(document.getElementById('mp_cantidad').value) || 1;
+    
+    const ganancia = subtotal * (margen / 100);
+    const total = subtotal + ganancia;
+    const unidad = total / cantidad;
+
+    document.getElementById('lbl-m-subtotal').innerText = `$ ${subtotal.toLocaleString('es-AR')}`;
+    document.getElementById('lbl-m-txt-ganancia').innerText = `${margen}% de ganancia`;
+    document.getElementById('lbl-m-ganancia').innerText = `$ ${ganancia.toLocaleString('es-AR')}`;
+    document.getElementById('lbl-m-total').innerText = `$ ${total.toLocaleString('es-AR')}`;
+    document.getElementById('lbl-m-unidad').innerText = `$ ${unidad.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+}
+
+async function guardarPresupuestoModerno(e) {
+    e.preventDefault();
+    
+    const inputs = document.querySelectorAll('.input-costo');
+    let detalles = {};
+    let subtotal = 0;
+    inputs.forEach(i => {
+        const val = parseFloat(i.value) || 0;
+        if (val > 0) {
+            detalles[i.getAttribute('data-nombre')] = val;
+            subtotal += val;
+        }
+    });
+
+    const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
+    const total = subtotal + (subtotal * (margen / 100));
+
+    const payload = {
+        cliente_id: document.getElementById('mp_cliente_id').value,
+        descripcion: document.getElementById('mp_descripcion').value,
+        cantidad: parseInt(document.getElementById('mp_cantidad').value),
+        costo_materiales: subtotal,
+        detalles_costos: detalles,
+        margen_ganancia: margen,
+        precio_final: total,
+        estado: document.getElementById('mp_estado').value,
+        fecha_creacion: new Date().toISOString().split('T')[0]
+    };
+
+    try {
+        await fetch(`${API_URL}/presupuestos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        cerrarModalPresupuesto();
+        cargarPresupuestos();
+        Swal.fire({ title: '¡Guardado!', text: 'Presupuesto creado con éxito', icon: 'success', timer: 1500, showConfirmButton: false });
+    } catch (e) { console.error(e); }
+}
+
+async function cargarPresupuestos() {
+    try {
+        const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
+        if(!respP.ok) return; 
+        
+        const presupuestos = await respP.json();
+        const clientes = await respC.json();
+        const tbody = document.querySelector('#tablePresupuestos tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+        presupuestos.reverse().forEach(p => {
+            const cliente = clientes.find(c => c.id === p.cliente_id);
+            const nombreCliente = cliente ? cliente.nombre_completo : 'Desconocido';
+            const btnConvertir = p.convertido_a_trabajo 
+                ? `<button class="btn secondary" disabled style="font-size:12px; padding:6px; opacity:0.5; cursor:not-allowed;">Ya es Trabajo</button>`
+                : `<button class="btn secondary" style="font-size:12px; padding:6px;" onclick="convertirATrabajo('${p.id}')">A Trabajo</button>`;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${p.fecha_creacion}</td>
+                    <td><b>${nombreCliente}</b></td>
+                    <td>${p.cantidad}x ${p.descripcion}</td>
+                    <td class="tnum" style="color:var(--magenta); font-weight:bold;">$ ${p.precio_final.toLocaleString('es-AR')}</td>
+                    <td><span style="background:var(--paper); padding:4px 8px; border-radius:4px; font-size:12px;">${p.estado}</span></td>
+                    <td style="display:flex; gap:5px;">
+                        ${btnConvertir}
+                        <button class="btn" style="font-size:12px; padding:6px; background:var(--ink);" onclick="generarPDFInterno('${p.id}')">PDF Interno</button>
+                        <button class="btn" style="font-size:12px; padding:6px; background:var(--blue);" onclick="generarPDFCliente('${p.id}')">PDF Cliente</button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (e) { console.error(e); }
+}
+
+async function convertirATrabajo(presupuesto_id) {
+    // Usamos el modal lindo de SweetAlert
+    const confirmacion = await Swal.fire({
+        title: '¿Pasar a Trabajo?',
+        text: "Esto enviará el presupuesto al Kanban de producción.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#D5006D',
+        cancelButtonColor: '#555',
+        confirmButtonText: 'Sí, enviar a Taller',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        const respP = await fetch(`${API_URL}/presupuestos/`);
+        const p = (await respP.json()).find(x => x.id === presupuesto_id);
+
+        const dataTrabajo = {
+            cliente_id: p.cliente_id,
+            descripcion_producto: p.descripcion,
+            cantidad: p.cantidad,
+            precio_venta: p.precio_final,
+            costo_total_materiales: p.costo_materiales,
+            notas_iniciales: `Viene de presupuesto autom.`,
+            fecha_creacion: new Date().toISOString().split('T')[0],
+            estado: "Aprobado"
+        };
+
+        await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataTrabajo) });
+        // Marcamos como convertido en DB
+        await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir`, { method: 'PUT' });
+        
+        cargarTrabajos();
+        cargarPresupuestos();
+        Swal.fire('¡Enviado!', 'El trabajo ya está en el tablero.', 'success');
+    } catch (e) { console.error(e); }
+}
+
+// ----------------------------------------------------
+// GENERADORES DE PDF (Doble versión)
+// ----------------------------------------------------
+async function armarMoldeBasePDF(presupuesto_id) {
+    const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
+    const p = (await respP.json()).find(x => x.id === presupuesto_id);
+    const c = (await respC.json()).find(x => x.id === p.cliente_id);
+    return { p, c };
+}
+
+// 1. PDF PARA EL CLIENTE (Simple y formal)
+async function generarPDFCliente(presupuesto_id) {
+    const { p, c } = await armarMoldeBasePDF(presupuesto_id);
+    const shortId = p.id.substring(0,6).toUpperCase();
+    
+    const div = document.createElement('div');
+    div.style.padding = '40px'; div.style.fontFamily = 'Arial';
+    div.innerHTML = `
+        <h1 style="color:#D5006D;">Gráfica Viamonte</h1>
+        <h3>Cotización Nº #${shortId} | Cliente: ${c.nombre_completo}</h3><hr>
+        <table style="width:100%; text-align:left; margin-top:20px;">
+            <tr style="background:#f4f4f4;"><th>Cant.</th><th>Descripción</th><th style="text-align:right;">Total</th></tr>
+            <tr><td>${p.cantidad}</td><td>${p.descripcion}</td><td style="text-align:right; font-weight:bold; font-size:18px;">$${p.precio_final.toLocaleString('es-AR')}</td></tr>
+        </table>
+        <p style="text-align:center; margin-top:50px; font-size:12px; color:#666;">Precio válido por 15 días.</p>
+    `;
+    html2pdf().set({ margin: 10, filename: `Cotizacion_Cliente_${shortId}.pdf` }).from(div).save();
+}
+
+// 2. PDF INTERNO (Detalle de todos los costos)
+async function generarPDFInterno(presupuesto_id) {
+    const { p, c } = await armarMoldeBasePDF(presupuesto_id);
+    const shortId = p.id.substring(0,6).toUpperCase();
+    
+    let filasCostos = '';
+    for (const [item, monto] of Object.entries(p.detalles_costos || {})) {
+        filasCostos += `<tr><td style="border:1px solid #ddd; padding:8px;">${item}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$${monto.toLocaleString('es-AR')}</td></tr>`;
+    }
+
+    const div = document.createElement('div');
+    div.style.padding = '40px'; div.style.fontFamily = 'Arial';
+    div.innerHTML = `
+        <h2>[INTERNO] Hoja de Costos - #${shortId}</h2>
+        <p><b>Cliente:</b> ${c.nombre_completo} | <b>Trabajo:</b> ${p.cantidad}x ${p.descripcion}</p>
+        <table style="width:100%; border-collapse:collapse; margin-top:20px;">
+            <tr style="background:#eee;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Ítem de Costo</th><th style="border:1px solid #ddd; padding:8px; text-align:right;">Monto</th></tr>
+            ${filasCostos}
+            <tr style="background:#ffe6f2;"><td style="border:1px solid #ddd; padding:8px;"><b>SUBTOTAL COSTOS</b></td><td style="border:1px solid #ddd; padding:8px; text-align:right;"><b>$${p.costo_materiales.toLocaleString('es-AR')}</b></td></tr>
+            <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia Aplicada (${p.margen_ganancia}%)</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$${(p.precio_final - p.costo_materiales).toLocaleString('es-AR')}</td></tr>
+        </table>
+        <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $${p.precio_final.toLocaleString('es-AR')}</h3>
+    `;
+    html2pdf().set({ margin: 10, filename: `Costos_Internos_${shortId}.pdf` }).from(div).save();
 }

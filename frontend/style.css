@@ -10,6 +10,7 @@
   --amber: #B87A1A;
   --green: #22824F;
   --red: #C13B3B;
+  --blue: #3B82F6;
   --radius: 12px;
   --sidebar-w: 240px;
 }
@@ -177,3 +178,10 @@ tr:hover td { background: var(--magenta-soft); }
     border-left: 4px solid var(--amber);
 }
 .nota-fecha { font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+.modal-overlay.hidden { display: none; }
+.modal-content { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+.costo-row { display: flex; justify-content: space-between; align-items: center; }
+.costo-row label { font-size: 13px; color: var(--ink); }
+.costo-row input { width: 120px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; text-align: right; }

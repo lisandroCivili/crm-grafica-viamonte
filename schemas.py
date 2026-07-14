@@ -56,19 +56,21 @@ class TrabajoResponse(TrabajoBase):
 # --- ESQUEMAS PARA PRESUPUESTOS ---
 class PresupuestoBase(BaseModel):
     cliente_id: str
-    detalle_costos_interno: Dict[str, Any] # Recibe el JSON con el desglose
-    porcentaje_ganancia: float
-    precio_final_neto: float
-    fecha_emision: date
-    metodo_pago_elegido: str
-    recargo_descuento_porcentaje: Optional[float] = 0.0
+    descripcion: str
+    cantidad: int
+    costo_materiales: float
+    detalles_costos: Optional[dict] = None
+    margen_ganancia: float
+    precio_final: float
+    estado: Optional[str] = "Borrador"
+    convertido_a_trabajo: Optional[bool] = False
+    fecha_creacion: date
 
 class PresupuestoCreate(PresupuestoBase):
     pass
 
 class PresupuestoResponse(PresupuestoBase):
     id: str
-    numero_secuencia: str
     model_config = {"from_attributes": True}
 
 

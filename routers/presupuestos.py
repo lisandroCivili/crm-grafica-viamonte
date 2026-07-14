@@ -23,6 +23,31 @@ def generar_numero_secuencia(db: Session) -> str:
     return "0001-000001"
 
 @router.post("/", response_model=schemas.PresupuestoResponse)
+def crear_presupuesto(presu: schemas.PresupuestoCreate, db: Session = Depends(get_db)):
+    nuevo = models.Presupuesto(**presu.model_dump())
+    db.add(nuevo)
+    db.commit()
+    db.refresh(nuevo)
+    return nuevo
+
+@router.get("/", response_model=list[schemas.PresupuestoResponse])
+def listar_presupuestos(db: Session = Depends(get_db)):
+    return db.query(models.Presupuesto).all()
+
+# (Abajo de la ruta POST y GET que ya tenías)
+@router.put("/{presupuesto_id}/convertir", response_model=schemas.PresupuestoResponse)
+def marcar_convertido(presupuesto_id: str, db: Session = Depends(get_db)):
+    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
+    if not db_presupuesto:
+        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    
+    db_presupuesto.convertido_a_trabajo = True
+    db_presupuesto.estado = "Aprobado"
+    db.commit()
+    db.refresh(db_presupuesto)
+    return db_presupuesto
+
+@router.post("/", response_model=schemas.PresupuestoResponse)
 def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depends(get_db)):
     # Verificamos que el cliente exista
     db_cliente = db.query(models.Cliente).filter(models.Cliente.id == presupuesto.cliente_id).first()
