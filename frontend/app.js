@@ -50,6 +50,44 @@ function cerrarSesion() {
     // Recargar la página es la forma más limpia de resetear todo y volver a mostrar el login
     location.reload(); 
 }
+async function descargarRespaldo() {
+    try {
+        // Mostramos un cartelito de carga
+        Swal.fire({
+            title: 'Generando respaldo...',
+            text: 'Empaquetando la base de datos',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        const resp = await fetch(`${API_URL}/backup`);
+        if (!resp.ok) throw new Error("Error al descargar");
+
+        // Convertimos la respuesta en un archivo (Blob)
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        
+        // Creamos un link invisible y lo "clickeamos" para forzar la descarga
+        const a = document.createElement('a');
+        a.href = url;
+        
+        const hoy = new Date();
+        const fechaStr = `${hoy.getDate().toString().padStart(2, '0')}-${(hoy.getMonth() + 1).toString().padStart(2, '0')}-${hoy.getFullYear()}`;
+        a.download = `respaldo_viamonte_${fechaStr}.db`;
+        
+        document.body.appendChild(a);
+        a.click();
+        
+        // Limpieza
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        Swal.fire('¡Respaldo Exitoso!', 'El archivo de tu base de datos se guardó en la carpeta de Descargas.', 'success');
+    } catch (error) {
+        console.error("Error en backup:", error);
+        Swal.fire('Error', 'No se pudo generar el respaldo', 'error');
+    }
+}
 
 // ==========================================
 // INICIO Y CARGA DE MÓDULOS

@@ -1,6 +1,9 @@
 import models
+import os
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from database import engine
@@ -37,6 +40,28 @@ app.include_router(cheques.router)
 app.include_router(notas.router)
 app.include_router(movimientos.router)
 app.include_router(auth.router)  # Incluimos el router de autenticación
+
+# ==========================================
+# RUTA DE RESPALDO (BACKUP)
+# ==========================================
+@app.get("/api/backup")
+def descargar_respaldo():
+    db_path = "viamonte.db"
+    
+    # Verificamos que el archivo exista por las dudas
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Base de datos no encontrada")
+    
+    # Armamos un nombre de archivo con la fecha de hoy
+    fecha_str = datetime.now().strftime("%d-%m-%Y")
+    nombre_archivo = f"respaldo_viamonte_{fecha_str}.db"
+    
+    # Forzamos la descarga del archivo
+    return FileResponse(
+        path=db_path, 
+        filename=nombre_archivo, 
+        media_type='application/octet-stream'
+    )
 
 # Modelo de validación para el Login sencillo
 class LoginRequest(BaseModel):

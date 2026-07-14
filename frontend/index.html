@@ -82,8 +82,10 @@
         <div class="nav-item" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
         <div class="nav-item" onclick="switchTab('tab-stock', this)">📦 Stock</div>
         
-        <!-- Botón de Cerrar Sesión -->
-        <div class="nav-item" style="margin-top: auto; color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
+        <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 5px;">
+          <div class="nav-item" style="color: #4dabf7;" onclick="descargarRespaldo()">💾 Descargar Respaldo</div>
+          <div class="nav-item" style="color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
+        </div>
       </nav>
     </aside>
 
