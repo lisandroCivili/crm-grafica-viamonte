@@ -1,0 +1,1117 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gráfica Viamonte — CRM Local</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Librerías Externas (Gráficos y PDF) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- LIBRERÍA DE GRÁFICOS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- Hoja de Estilos -->
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- PANTALLA DE LOGIN (TELÓN) -->
+    <div id="login-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f0f2f5; z-index: 9999; display: flex; justify-content: center; align-items: center;">
+      <div style="background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 350px; text-align: center;">
+          <h1 style="color: var(--magenta); margin-bottom: 5px;">Gráfica Viamonte</h1>
+          <div style="color: var(--muted); margin-bottom: 30px; font-size: 14px;">Acceso restringido</div>
+          
+          <form id="form-login" onsubmit="hacerLogin(event)">
+              <input type="text" id="login-user" placeholder="Usuario" required style="width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <input type="password" id="login-pass" placeholder="Contraseña" required style="width: 100%; padding: 12px; margin-bottom: 25px; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box;">
+              <button type="submit" class="btn" style="width: 100%; background: var(--ink); padding: 12px; font-size: 16px;">Ingresar al sistema</button>
+          </form>
+      </div>
+    </div>
+    <!-- PANTALLA DE LOGIN HARDCODEADO -->
+    <!-- <div id="login-screen">
+      <div class="login-box">
+        <h2>Gráfica Viamonte</h2>
+        <p style="color: var(--muted); margin-top: -10px; margin-bottom: 20px">
+          Acceso al sistema local
+        </p>
+        <form id="login-form">
+          <input type="text" id="login-user" placeholder="Usuario" required />
+          <input
+            type="password"
+            id="login-pass"
+            placeholder="Contraseña"
+            required
+          />
+          <button type="submit" class="btn" style="width: 100%">
+            Ingresar
+          </button>
+        </form>
+        <div
+          id="login-error"
+          style="
+            color: var(--red);
+            margin-top: 10px;
+            font-size: 13px;
+            display: none;
+          "
+        >
+          Usuario o clave incorrectos.
+        </div>
+      </div>
+    </div> -->
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="brand"><div class="brand-name">Gráfica Viamonte</div></div>
+      <nav class="nav-menu">
+        <div class="nav-item active" onclick="switchTab('tab-dashboard', this)">📊 Dashboard</div>
+        <div class="nav-item" onclick="switchTab('tab-trabajos', this)">📋 Trabajos</div>
+        <div class="nav-item" onclick="switchTab('tab-presupuestos', this)">💰 Presupuestos</div>
+        <div class="nav-item" onclick="switchTab('tab-clientes', this)">👥 Clientes</div>
+        <div class="nav-item" onclick="switchTab('tab-cheques', this)">🏦 Cheques</div>
+        <div class="nav-item" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
+        <div class="nav-item" onclick="switchTab('tab-stock', this)">📦 Stock</div>
+        
+        <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 5px;">
+          <div class="nav-item" style="color: #4dabf7;" onclick="descargarRespaldo()">💾 Descargar Respaldo</div>
+          <div class="nav-item" style="color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main id="main">
+      <!-- MÓDULO DE CHEQUES -->
+    <section id="tab-cheques" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Cartera de Cheques</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Control de valores diferidos, cobros y endosos</div>
+        </div>
+        <button class="btn" style="background: var(--ink);" onclick="abrirDrawerCheque()">+ Ingresar Cheque</button>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tableCheques">
+          <thead>
+            <tr>
+              <th>Fecha Cobro</th>
+              <th>Banco y N°</th>
+              <th>Cliente</th>
+              <th class="tnum">Monto ($)</th>
+              <th style="text-align:center;">Estado</th>
+              <th style="text-align:center;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="6" style="text-align:center; color:var(--muted);">Cargando cheques...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+      <!-- DASHBOARD -->
+      <!-- DASHBOARD PRINCIPAL -->
+    <section id="tab-dashboard" class="view-section active">
+      <div class="topbar">
+        <div>
+          <h1>Panel de Control</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Resumen financiero y operativo del taller</div>
+        </div>
+        <!-- LA MÁQUINA DEL TIEMPO -->
+        <div>
+          <select id="dash-filtro-tiempo" onchange="cargarDashboard()" style="padding: 10px; border: 2px solid var(--magenta); border-radius: 6px; font-weight: bold; color: var(--magenta); background: var(--magenta-soft); cursor: pointer; outline: none;">
+            <option value="este_mes">Este Mes</option>
+            <option value="mes_pasado">Mes Pasado</option>
+            <option value="este_anio">Este Año</option>
+            <option value="historico">Histórico Completo</option>
+          </select>
+          <button class="btn" style="background: var(--ink); height: 40px;" onclick="generarPDFEjecutivo()">📄 Exportar Cierre</button>
+        </div>
+      </div>
+
+      <!-- BLOQUE 1: KPIs (TARJETAS VITALES) -->
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-top: 25px;">
+        
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Ingresos (Facturado)</div>
+          <div id="kpi-ingresos" style="font-size: 26px; font-weight: bold; color: var(--green); margin-top: 5px;">$ 0</div>
+        </div>
+
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Egresos (Gastos)</div>
+          <div id="kpi-egresos" style="font-size: 26px; font-weight: bold; color: var(--red); margin-top: 5px;">$ 0</div>
+        </div>
+
+        <div style="background: var(--magenta-soft); padding: 20px; border-radius: 12px; border: 1px solid var(--line);">
+          <div style="font-size: 12px; color: var(--magenta); font-weight: 600; text-transform: uppercase;">Ganancia Neta</div>
+          <div id="kpi-ganancia" style="font-size: 26px; font-weight: bold; color: var(--magenta); margin-top: 5px;">$ 0</div>
+        </div>
+
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--amber); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Plata en la Calle (Por cobrar)</div>
+          <div id="kpi-calle" style="font-size: 26px; font-weight: bold; color: var(--amber); margin-top: 5px;">$ 0</div>
+        </div>
+
+        <!-- Tarjeta de Cheques -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Cheques en Cartera</div>
+          <div id="kpi-cheques" style="font-size: 26px; font-weight: bold; color: var(--ink); margin-top: 5px;">$ 0</div>
+        </div>
+
+      </div>
+
+      <!-- BLOQUE 2: GRÁFICOS -->
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 25px;">
+        <!-- Gráfico de Flujo de Caja (Barras) -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line);">
+          <h3 style="font-size: 14px; margin-bottom: 15px; color: var(--ink);">Flujo de Caja Anual</h3>
+          <canvas id="chartFlujo" height="100"></canvas>
+        </div>
+
+        <!-- Gráfico de Egresos (Torta) -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line);">
+          <h3 style="font-size: 14px; margin-bottom: 15px; color: var(--ink);">Distribución de Gastos</h3>
+          <canvas id="chartDistribucion" height="200"></canvas>
+        </div>
+      </div>
+      <!-- BLOQUE 3: ALERTAS Y SEMÁFOROS -->
+      <div style="margin-top: 25px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+        
+        <!-- Plata Estancada (Taller) -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--amber); border-left: 5px solid var(--amber);">
+          <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--amber);">⚙️ Plata estancada en Taller</h3>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Trabajos aprobados o en producción que aún no se entregaron.</p>
+          <div id="alerta-estancada" style="font-size: 24px; font-weight: bold; color: var(--ink);">$ 0</div>
+        </div>
+
+        <!-- Semáforo de Morosos -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--red); border-left: 5px solid var(--red);">
+          <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--red);">🔴 Semáforo de Morosos</h3>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Trabajos entregados pero con saldo pendiente de cobro.</p>
+          <div id="lista-morosos" style="max-height: 120px; overflow-y: auto; font-size: 13px;">
+            <!-- Se llena con JS -->
+          </div>
+        </div>
+
+        <!-- Cheques a Depositar -->
+        <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid #17a2b8; border-left: 5px solid #17a2b8;">
+          <h3 style="font-size: 14px; margin-bottom: 10px; color: #17a2b8;">🏦 Cheques a Depositar (Próx. 7 días)</h3>
+          <div id="alerta-cheques" style="max-height: 120px; overflow-y: auto; font-size: 13px;"></div>
+        </div>
+      </div>
+    </section>
+
+      <!-- TRABAJOS (TABLERO KANBAN) -->
+      <!-- TRABAJOS (TABLERO KANBAN) -->
+      <section id="tab-trabajos" class="view-section">
+        <div class="topbar">
+          <div>
+            <h1>Tablero de Producción</h1>
+            <div class="sub">Gestión visual del estado del taller</div>
+          </div>
+          <div>
+            <button
+              class="btn pdf"
+              style="margin-right: 10px"
+              onclick="generarInformeDiarioPDF()"
+            >
+              🖨️ Informe Diario (PDF)
+            </button>
+            <button class="btn" onclick="toggleDrawer('drawer-nuevo-trabajo')">
+              + Nuevo Trabajo
+            </button>
+          </div>
+        </div>
+
+        <div class="kanban-board">
+        <div class="kanban-col" id="col-pendiente" ondrop="soltarTarjeta(event, 'Pendiente de Pago')" ondragover="permitirSoltar(event)">
+          <h4>Pendiente / Aprobado</h4>
+        </div>
+        <div class="kanban-col" id="col-diseno" style="background:#e0d9f0;" ondrop="soltarTarjeta(event, 'En Diseño')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--magenta-dark)">En Diseño</h4>
+        </div>
+        <div class="kanban-col" id="col-produccion" style="background:#f7eedb;" ondrop="soltarTarjeta(event, 'En Producción')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--amber)">En Producción</h4>
+        </div>
+        <div class="kanban-col" id="col-entregado" style="background:#dbf0e3;" ondrop="soltarTarjeta(event, 'Entregado')" ondragover="permitirSoltar(event)">
+          <h4 style="color:var(--green)">Entregado</h4>
+        </div>
+      </div>
+      </section>
+
+      <!-- PRESUPUESTOS -->
+      <!-- PRESUPUESTOS (Cotizador) -->
+    <section id="tab-presupuestos" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Presupuestos</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Cotizador y generador de PDFs</div>
+        </div>
+        <button class="btn" onclick="abrirDrawerPresupuesto()">+ Nuevo Presupuesto</button>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tablePresupuestos">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Cliente</th>
+              <th>Detalle</th>
+              <th class="tnum">Total ($)</th>
+              <th>Estado</th>
+              <th style="text-align:center;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Los presupuestos se inyectan acá con JS -->
+            <tr><td colspan="6" style="text-align:center; color:var(--muted);">Cargando presupuestos...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+      <!-- CLIENTES (LISTADO + BUSCADOR) -->
+      <section id="tab-clientes" class="view-section">
+        <div class="topbar">
+          <div>
+            <h1>Base de Clientes</h1>
+            <div class="sub" style="color: var(--muted); margin-top: 4px">
+              Directorio, estado de cuenta y consumos
+            </div>
+          </div>
+          <button class="btn" onclick="toggleDrawer('drawer-nuevo-cliente')">
+            + Agregar Cliente
+          </button>
+        </div>
+
+        <div class="search-wrapper">
+          <input
+            type="text"
+            class="search-input"
+            id="clientSearch"
+            placeholder="🔍 Buscar por nombre, empresa, DNI o CUIT/CUIL..."
+          />
+        </div>
+
+        <div class="panel">
+          <table id="tableClientes">
+            <thead>
+              <tr>
+                <th>Cliente / Razón Social</th>
+                <th>Contacto / Empresa</th>
+                <th>DNI / CUIT</th>
+                <th>Saldo Cta Cte</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Acá se inyectan los clientes con app.js -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- CHEQUES -->
+      <section id="tab-cheques" class="view-section">
+        <div class="topbar"><h1>Gestión de Cheques</h1></div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px">
+          <div class="panel">
+            <h3 style="color: var(--green)">Recibidos (A Cobrar)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha Cobro</th>
+                  <th>Cliente</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>15/08/2026</td>
+                  <td>Pizzería Don Luis</td>
+                  <td class="tnum">$50.000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3 style="color: var(--red)">Emitidos (A Cubrir)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha Cobro</th>
+                  <th>Proveedor</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>20/08/2026</td>
+                  <td>Papelera Tucumán</td>
+                  <td class="tnum">$80.000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- GASTOS FIJOS Y OPERATIVOS -->
+    <section id="tab-gastos" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Gastos Fijos y Operativos</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Control de egresos y facturas del taller</div>
+        </div>
+        <button class="btn" style="background: var(--red);" onclick="abrirDrawerGasto()">+ Registrar Gasto</button>
+      </div>
+
+      <!-- NUEVA BARRA DE FILTROS Y TOTALIZADOR -->
+      <div style="display: flex; gap: 15px; margin-top: 20px; align-items: center; background: var(--paper); padding: 15px; border-radius: 8px; border: 1px solid var(--line);">
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Período</label>
+          <select id="filtro-mes-gasto" onchange="cargarGastos()" style="padding: 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">
+            <option value="este_mes">Este Mes</option>
+            <option value="mes_pasado">Mes Pasado</option>
+            <option value="todos">Histórico (Todos)</option>
+          </select>
+        </div>
+        
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Categoría</label>
+          <select id="filtro-cat-gasto" onchange="cargarGastos()" style="padding: 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">
+            <option value="todas">Todas las categorías</option>
+            <option value="Insumos">Insumos y Materiales</option>
+            <option value="Servicios">Servicios (Luz, Internet)</option>
+            <option value="Sueldos">Sueldos / Honorarios</option>
+            <option value="Mantenimiento">Mantenimiento</option>
+            <option value="Otros">Otros</option>
+          </select>
+        </div>
+
+        <div style="margin-left: auto; text-align: right;">
+          <div style="font-size: 12px; color: var(--muted);">Total de Egresos</div>
+          <div id="lbl-total-gastos" style="color: var(--red); font-size: 22px; font-weight: bold;">$ 0</div>
+        </div>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tableGastos">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Categoría</th>
+              <th>Concepto / Detalle</th>
+              <th class="tnum">Monto ($)</th>
+              <th style="text-align:center;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" style="text-align:center; color:var(--muted);">Cargando gastos...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- STOCK E INVENTARIO -->
+    <section id="tab-stock" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Control de Stock</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Inventario, alertas y valorización</div>
+        </div>
+        <button class="btn" onclick="abrirDrawerStock()">+ Nuevo Artículo</button>
+      </div>
+
+      <!-- VALORIZACIÓN DEL INVENTARIO -->
+      <div style="background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-size: 12px; color: var(--muted);">Capital inmovilizado en insumos</div>
+          <div id="lbl-valor-inventario" style="color: var(--magenta); font-size: 24px; font-weight: bold;">$ 0</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 12px; color: var(--muted);">Artículos en Alerta Roja</div>
+          <div id="lbl-alertas-stock" style="color: var(--red); font-size: 20px; font-weight: bold;">0</div>
+        </div>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tableStock">
+          <thead>
+            <tr>
+              <th>Artículo</th>
+              <th>Categoría / Proveedor</th>
+              <th style="text-align:center;">Costo Unit.</th>
+              <th style="text-align:center;">Cantidad Actual</th>
+              <th style="text-align:center;">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" style="text-align:center; color:var(--muted);">Cargando stock...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- DRAWER: NUEVO ARTÍCULO DE STOCK -->
+    <div id="drawer-nuevo-stock" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-stock')">✖</button>
+      <h3>Registrar Insumo</h3>
+      
+      <form id="form-stock" onsubmit="guardarArticuloStock(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Nombre del Insumo *</label>
+          <input type="text" id="fs_nombre" placeholder="Ej: Resma A4 Boreal 80g" required style="width: 100%; padding: 10px;">
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Categoría</label>
+            <select id="fs_categoria" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+              <option value="Papeles">Papeles</option>
+              <option value="Tintas">Tintas</option>
+              <option value="Rígidos">Rígidos y Vinilos</option>
+              <option value="Packaging">Packaging</option>
+              <option value="General">General / Otros</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Proveedor (Opcional)</label>
+            <input type="text" id="fs_proveedor" placeholder="Ej: Papelera Tucumán" style="width: 100%; padding: 10px;">
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Unidad *</label>
+            <select id="fs_unidad" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+              <option value="unidades">Unidades (u)</option>
+              <option value="resmas">Resmas</option>
+              <option value="litros">Litros (L)</option>
+              <option value="metros">Metros (m)</option>
+              <option value="cm">Centímetros (cm)</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px; color: var(--magenta);">Costo Unit. ($) *</label>
+            <input type="number" id="fs_costo" step="0.01" value="0" required style="width: 100%; padding: 10px;">
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Cantidad Inicial *</label>
+            <input type="number" id="fs_cantidad" step="0.1" value="0" required style="width: 100%; padding: 10px;">
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px; color: var(--red);">Alerta Mínima *</label>
+            <input type="number" id="fs_minimo" step="0.1" value="5" required style="width: 100%; padding: 10px;" title="Te avisa cuando quede menos de esta cantidad">
+          </div>
+        </div>
+
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--ink);">Guardar Insumo</button>
+      </form>
+    </div>
+
+      <!-- DRAWER: FICHA DEL CLIENTE -->
+    <!-- DRAWER: FICHA DEL CLIENTE -->
+    <div id="drawer-cliente" class="drawer" style="width: 600px;">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-cliente')">✖</button>
+      
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
+        <div>
+          <h2 id="ficha-nombre" style="margin:0; color:var(--magenta);">Nombre Cliente</h2>
+          <p id="ficha-cuit" style="color:var(--muted); margin-top:4px;">CUIT: -</p>
+        </div>
+      </div>
+
+      <div class="kpi" style="margin-bottom: 24px; text-align:center;">
+        <div class="label">Saldo de Cuenta Corriente</div>
+        <div class="value" id="ficha-saldo" style="color:var(--green); font-size: 28px;">$0.00</div>
+      </div>
+
+      <!-- PESTAÑAS (TABS) -->
+      <div class="tabs-ficha" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--line); padding-bottom: 10px;">
+        <button class="btn secondary active" id="btn-tab-trabajos" onclick="switchFichaTab('trabajos')">📋 Trabajos</button>
+        <button class="btn secondary" id="btn-tab-movimientos" onclick="switchFichaTab('movimientos')">💸 Movimientos</button>
+        <button class="btn secondary" id="btn-tab-notas" onclick="switchFichaTab('notas')">📝 Notas</button>
+      </div>
+
+      <!-- 1. CONTENIDO: TRABAJOS (Acordeones) -->
+      <div id="ficha-content-trabajos" class="ficha-content active">
+        <div id="lista-trabajos-cliente">
+          <!-- Acá se inyectan los acordeones dinámicamente con JS -->
+          <p style="color: var(--muted); text-align: center;">Cargando trabajos...</p>
+        </div>
+      </div>
+
+      <!-- 2. CONTENIDO: MOVIMIENTOS -->
+      <div id="ficha-content-movimientos" class="ficha-content">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+          <button class="btn" style="background: var(--green);" onclick="abrirDrawerPago()">+ Registrar Pago</button>
+          <button class="btn secondary" onclick="descargarMovimientosPDF()">⬇️ Descargar PDF</button>
+        </div>
+        <table id="tabla-movimientos">
+          <thead><tr><th>Fecha</th><th>Detalle</th><th>Monto</th></tr></thead>
+          <tbody>
+             <!-- Inyectados por JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 3. CONTENIDO: NOTAS -->
+      <div id="ficha-content-notas" class="ficha-content">
+        <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+          <input type="text" id="nueva-nota-texto" placeholder="Escribir una nota rápida..." style="flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+          <button class="btn" onclick="guardarNotaFicha()">Guardar</button>
+        </div>
+        <div id="lista-notas-cliente" style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Notas inyectadas por JS -->
+        </div>
+      </div>
+    </div>
+
+      <!-- DRAWER: CALCULADOR DE PRESUPUESTO -->
+      <div id="drawer-presupuesto" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-presupuesto')"
+        >
+          ✖
+        </button>
+        <h3>Armar Presupuesto</h3>
+        <p style="font-size: 12px; color: var(--muted)">
+          Ingresá los costos, el sistema calcula la ganancia.
+        </p>
+
+        <div style="margin-top: 20px">
+          <div class="form-group">
+            <label>Papel</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Diseño / Chapas</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Impresión / Tintas</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Troquel / Terminación</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+          <div class="form-group">
+            <label>Gastos Varios (Luz, Flete)</label
+            ><input
+              type="number"
+              class="costo-input"
+              oninput="calcularTotalPresupuesto()"
+            />
+          </div>
+        </div>
+
+        <div
+          style="
+            margin-top: 20px;
+            border-top: 1px solid var(--line);
+            padding-top: 20px;
+          "
+        >
+          <div class="form-group">
+            <label style="font-weight: bold; color: var(--magenta)"
+              >% de Ganancia Deseada</label
+            >
+            <input
+              type="number"
+              id="porcentaje-ganancia"
+              value="30"
+              oninput="calcularTotalPresupuesto()"
+              style="border-color: var(--magenta)"
+            />
+          </div>
+        </div>
+
+        <div class="resumen-caja">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            "
+          >
+            <span>Subtotal Costos:</span>
+            <span id="lbl-subtotal" class="tnum">$0</span>
+          </div>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            "
+          >
+            <span>Ganancia Neta:</span>
+            <span id="lbl-ganancia" class="tnum">$0</span>
+          </div>
+          <hr
+            style="
+              border: none;
+              border-top: 1px solid rgba(0, 0, 0, 0.1);
+              margin: 10px 0;
+            "
+          />
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: 18px;
+              font-weight: bold;
+            "
+          >
+            <span>Precio Venta:</span>
+            <span id="lbl-total" class="tnum">$0</span>
+          </div>
+        </div>
+        <button class="btn" style="width: 100%; margin-top: 20px">
+          Guardar Presupuesto
+        </button>
+      </div>
+
+      <!-- DRAWER: NUEVO CLIENTE -->
+      <div id="drawer-nuevo-cliente" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-nuevo-cliente')"
+        >
+          ✖
+        </button>
+        <h3>Agregar Cliente Nuevo</h3>
+        <form
+          id="form-cliente"
+          onsubmit="guardarCliente(event)"
+          style="margin-top: 20px"
+        >
+          <div class="form-group">
+            <label>Nombre Completo *</label>
+            <input
+              type="text"
+              id="fc_nombre"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Empresa / Local</label>
+            <input
+              type="text"
+              id="fc_empresa"
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>DNI o CUIT *</label>
+            <input
+              type="text"
+              id="fc_cuit"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Teléfono (WhatsApp) *</label>
+            <input
+              type="text"
+              id="fc_telefono"
+              required
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Aviso recompra (Días)</label>
+            <input
+              type="number"
+              id="fc_recompra"
+              placeholder="Ej: 45"
+              style="width: 250px; text-align: left"
+            />
+          </div>
+          <button
+            type="submit"
+            class="btn"
+            style="width: 100%; margin-top: 20px"
+          >
+            Guardar Cliente
+          </button>
+        </form>
+      </div>
+      <!-- DRAWER: EDITAR TRABAJO -->
+    <div id="drawer-editar-trabajo" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-editar-trabajo')">✖</button>
+      <h3>Editar Trabajo</h3>
+      <p style="font-size:12px; color:var(--muted);">El cambio quedará registrado en el historial.</p>
+      
+      <form id="form-editar-trabajo" onsubmit="guardarEdicionTrabajo(event)" style="margin-top: 20px;">
+        <input type="hidden" id="fe_trabajo_id">
+        <input type="hidden" id="fe_cliente_id">
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+          <label style="margin-bottom: 5px;">Descripción del Producto</label>
+          <input type="text" id="fe_descripcion" required style="width: 100%; text-align: left;">
+        </div>
+        <div class="form-group">
+          <label>Cantidad</label>
+          <input type="number" id="fe_cantidad" required>
+        </div>
+        <div class="form-group">
+          <label>Precio de Venta ($)</label>
+          <input type="number" id="fe_precio" required>
+        </div>
+        
+        <hr style="border:none; border-top:1px solid var(--line); margin: 20px 0;">
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px; color:var(--magenta);">Razón del cambio (Obligatorio)</label>
+          <input type="text" id="fe_razon" placeholder="Ej: Cliente pidió aumentar cantidad" required style="width: 100%; text-align: left;">
+        </div>
+        
+        <button type="submit" class="btn" style="width:100%; margin-top:20px;">Guardar Cambios</button>
+      </form>
+    </div>
+      <!-- DRAWER: NUEVO TRABAJO -->
+      <div id="drawer-nuevo-trabajo" class="drawer">
+        <button
+          class="close-drawer"
+          onclick="toggleDrawer('drawer-nuevo-trabajo')"
+        >
+          ✖
+        </button>
+        <h3>Ingresar Trabajo al Taller</h3>
+        <form
+          id="form-trabajo"
+          onsubmit="guardarTrabajo(event)"
+          style="margin-top: 20px"
+        >
+          <div
+            class="form-group"
+            style="flex-direction: column; align-items: flex-start"
+          >
+            <label style="margin-bottom: 5px">Seleccionar Cliente *</label>
+            <select
+              id="ft_cliente_id"
+              required
+              style="
+                width: 100%;
+                padding: 8px;
+                border: 1px solid var(--line);
+                border-radius: 6px;
+              "
+            ></select>
+          </div>
+          <div
+            class="form-group"
+            style="
+              flex-direction: column;
+              align-items: flex-start;
+              margin-top: 10px;
+            "
+          >
+            <label style="margin-bottom: 5px">Descripción del Producto *</label>
+            <input
+              type="text"
+              id="ft_descripcion"
+              required
+              style="width: 100%; text-align: left"
+            />
+          </div>
+          <div class="form-group">
+            <label>Cantidad *</label>
+            <input type="number" id="ft_cantidad" required />
+          </div>
+          <div class="form-group">
+            <label>Precio de Venta ($) *</label>
+            <input type="number" id="ft_precio" required />
+          </div>
+          <div class="form-group">
+            <label>Costo de Materiales ($) *</label>
+            <input type="number" id="ft_costo" required />
+          </div>
+          <div
+            class="form-group"
+            style="
+              flex-direction: column;
+              align-items: flex-start;
+              margin-top: 10px;
+            "
+          >
+            <label style="margin-bottom: 5px">Forma de Pago acordada</label>
+            <select
+              id="ft_pago"
+              style="
+                width: 100%;
+                padding: 8px;
+                border: 1px solid var(--line);
+                border-radius: 6px;
+              "
+            >
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Cheque">Cheque</option>
+            </select>
+          </div>
+          <!-- (Adentro de form-trabajo, arriba del botón submit) -->
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+          <label style="margin-bottom: 5px;">Notas / Especificaciones (Opcional)</label>
+          <textarea id="ft_notas" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; resize: vertical;" rows="3" placeholder="Ej: Cliente pide que sea color rojo mate..."></textarea>
+        </div>
+          <button
+            type="submit"
+            class="btn"
+            style="width: 100%; margin-top: 20px"
+          >
+            Enviar a Tablero
+          </button>
+        </form>
+      </div>
+
+      <!-- DRAWER: REGISTRAR PAGO -->
+    <div id="drawer-nuevo-pago" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-pago')">✖</button>
+      <h3>Registrar Pago</h3>
+      <p style="font-size:12px; color:var(--muted);">El pago se sumará a la cuenta corriente del cliente.</p>
+      
+      <form id="form-pago" onsubmit="guardarPago(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Monto a abonar ($) *</label>
+          <input type="number" id="fp_monto" required style="width: 100%; text-align: left; padding: 10px;">
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Método de Pago *</label>
+          <select id="fp_metodo" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="MercadoPago">MercadoPago</option>
+            <option value="Cheque">Cheque</option>
+          </select>
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Asociar a un Trabajo (Opcional)</label>
+          <!-- Este select se llena solo desde Javascript -->
+          <select id="fp_trabajo_id" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="">Ninguno (Pago general a cuenta)</option>
+          </select>
+        </div>
+        
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--green);">Confirmar Pago</button>
+      </form>
+    </div>
+
+    <!-- DRAWER: NUEVO PRESUPUESTO -->
+    <!-- MODAL CENTRAL: NUEVO PRESUPUESTO -->
+    <div id="modal-presupuesto" class="modal-overlay hidden">
+        <div class="modal-content" style="width: 550px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">Nuevo presupuesto <span style="color:var(--muted); font-weight:normal; font-size:14px;" id="lbl-pres-id">Nº 0001-XXXX</span></h3>
+                <button onclick="cerrarModalPresupuesto()" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted);">✖</button>
+            </div>
+            
+            <form id="form-presupuesto" onsubmit="guardarPresupuestoModerno(event)">
+                <div style="display:flex; gap:15px; margin-bottom: 15px;">
+                    <div style="flex:1;">
+                        <label style="font-size:12px; color:var(--muted);">Producto</label>
+                        <input type="text" id="mp_descripcion" placeholder="Ej: Bolsas de papel" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px; color:var(--muted);">Cliente (Empresa)</label>
+                        <select id="mp_cliente_id" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"></select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="font-size:12px; color:var(--muted);">Cantidad</label>
+                    <input type="number" id="mp_cantidad" value="1" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
+                </div>
+
+                <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">Costos (dejá vacío lo que no aplique)</p>
+                <div id="contenedor-costos" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom: 20px;">
+                    <!-- Se inyectan los inputs de costos por JS -->
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="font-size:12px; color:var(--muted);">% de ganancia</label>
+                    <input type="number" id="mp_margen" placeholder="Ej: 35" value="100" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
+                </div>
+
+                <div style="margin-bottom: 25px;">
+                    <label style="font-size:12px; color:var(--muted);">Estado</label>
+                    <select id="mp_estado" style="width:100%; padding:10px; border:2px solid var(--magenta); border-radius:6px; font-weight:bold; color:var(--magenta);">
+                        <option value="Borrador">Borrador</option>
+                        <option value="Enviado">Enviado</option>
+                        <option value="Aprobado">Aprobado</option>
+                        <option value="Rechazado">Rechazado</option>
+                    </select>
+                </div>
+
+                <!-- Resumen Fijo -->
+                <div style="background: var(--magenta-soft); padding: 15px; border-radius: 8px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:14px; color:var(--ink);">
+                        <span>Sub total</span> <span id="lbl-m-subtotal">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:14px; color:var(--ink);">
+                        <span id="lbl-m-txt-ganancia">0% de ganancia</span> <span id="lbl-m-ganancia">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:16px; font-weight:bold; color:var(--magenta);">
+                        <span>Precio Total Trabajo</span> <span id="lbl-m-total">$0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:14px; color:var(--magenta);">
+                        <span>Precio por unidad</span> <span id="lbl-m-unidad">$0</span>
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                    <button type="button" class="btn secondary" onclick="cerrarModalPresupuesto()">Cancelar</button>
+                    <button type="submit" class="btn">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- DRAWER: NUEVO GASTO -->
+    <div id="drawer-nuevo-gasto" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-gasto')">✖</button>
+      <h3>Registrar Salida de Dinero</h3>
+      <p style="font-size:12px; color:var(--muted);">Esto restará del cálculo de ganancias a fin de mes.</p>
+      
+      <form id="form-gasto" onsubmit="guardarGasto(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Categoría *</label>
+          <select id="fg_categoria" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="Insumos">Insumos y Materiales</option>
+            <option value="Servicios">Servicios (Luz, Internet, Alquiler)</option>
+            <option value="Sueldos">Sueldos / Honorarios</option>
+            <option value="Mantenimiento">Mantenimiento / Repuestos</option>
+            <option value="Otros">Otros Egresos</option>
+          </select>
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Concepto (Descripción) *</label>
+          <input type="text" id="fg_concepto" placeholder="Ej: Compra de 5 resmas A4" required style="width: 100%; padding: 10px;">
+        </div>
+
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Asociar a un Trabajo (Opcional)</label>
+          <select id="fg_trabajo_id" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <option value="">Ninguno (Gasto general del taller)</option>
+            <!-- Los trabajos activos se inyectan acá por JS -->
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Método de Pago *</label>
+            <select id="fg_metodo" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia / MP">Transferencia / MP</option>
+              <option value="Tarjeta">Tarjeta (Crédito/Débito)</option>
+              <option value="Cheque">Cheque</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Comprobante *</label>
+            <select id="fg_comprobante" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+              <option value="Sin comprobante">Ticket X / En negro</option>
+              <option value="Factura A">Factura A</option>
+              <option value="Factura B/C">Factura B o C</option>
+            </select>
+          </div>
+        </div>
+
+
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px; color: var(--red);">Monto Total ($) *</label>
+          <input type="number" id="fg_monto" required style="width: 100%; padding: 10px;">
+        </div>
+        
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px;">Fecha *</label>
+          <input type="date" id="fg_fecha" required style="width: 100%; padding: 10px;">
+        </div>
+
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--red);">Confirmar Gasto</button>
+      </form>
+    </div>
+    <!-- DRAWER: NUEVO CHEQUE -->
+    <div id="drawer-nuevo-cheque" class="drawer">
+      <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-cheque')">✖</button>
+      <h3>Ingresar Nuevo Cheque</h3>
+      
+      <form id="form-cheque" onsubmit="guardarCheque(event)" style="margin-top: 20px;">
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+          <label style="margin-bottom: 5px;">Cliente (Emisor) *</label>
+          <select id="fch_cliente" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+            <!-- Se llena con JS -->
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Banco *</label>
+            <input type="text" id="fch_banco" placeholder="Ej: Galicia" required style="width: 100%; padding: 10px;">
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">N° de Cheque *</label>
+            <input type="text" id="fch_numero" required style="width: 100%; padding: 10px;">
+          </div>
+        </div>
+
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label style="margin-bottom: 5px; color: var(--magenta);">Monto ($) *</label>
+          <input type="number" id="fch_monto" step="0.01" required style="width: 100%; padding: 10px;">
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px;">Fecha Emisión *</label>
+            <input type="date" id="fch_emision" required style="width: 100%; padding: 10px;">
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; flex: 1;">
+            <label style="margin-bottom: 5px; color: var(--red);">Fecha de Cobro *</label>
+            <input type="date" id="fch_cobro" required style="width: 100%; padding: 10px;" title="Día en que se puede depositar">
+          </div>
+        </div>
+
+        <button type="submit" class="btn" style="width:100%; margin-top:25px; background:var(--ink);">Guardar Cheque</button>
+      </form>
+    </div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
