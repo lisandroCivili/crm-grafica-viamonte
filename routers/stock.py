@@ -24,10 +24,16 @@ def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: 
     db_art = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == articulo_id).first()
     if not db_art:
         raise HTTPException(status_code=404, detail="Artículo no encontrado")
-    
+
+    # Campos descriptivos: se pisan directo, no generan historial (el historial es solo para cantidad)
+    for campo in ("nombre", "categoria", "proveedor", "unidad", "stock_minimo"):
+        valor = getattr(update_data, campo)
+        if valor is not None:
+            setattr(db_art, campo, valor)
+
     if update_data.cantidad is not None:
         diferencia = update_data.cantidad - db_art.cantidad
-        
+
         # MAGIA: Si hubo un cambio real, registramos el historial
         if diferencia != 0:
             historial = models.HistorialStock(
@@ -40,7 +46,7 @@ def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: 
 
     if update_data.costo_unitario is not None:
         db_art.costo_unitario = update_data.costo_unitario
-        
+
     db_art.ultima_actualizacion = date.today()
     db.commit()
     return {"mensaje": "Stock actualizado"}
@@ -49,3 +55,15 @@ def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: 
 def ver_historial(articulo_id: str, db: Session = Depends(get_db)):
     # Trae los movimientos del más nuevo al más viejo
     return db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).order_by(models.HistorialStock.fecha.desc()).all()
+
+@router.delete("/{articulo_id}")
+def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
+    db_art = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == articulo_id).first()
+    if not db_art:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+
+    # El historial de ajustes pertenece al artículo: se borra junto con él.
+    db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).delete()
+    db.delete(db_art)
+    db.commit()
+    return {"mensaje": "Artículo eliminado"}

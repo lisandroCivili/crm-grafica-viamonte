@@ -45,3 +45,26 @@ def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, d
     db.commit()
     db.refresh(db_trabajo)
     return db_trabajo
+
+@router.delete("/{trabajo_id}")
+def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
+    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
+    if not db_trabajo:
+        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+
+    tiene_movimientos = db.query(models.Movimiento).filter(models.Movimiento.trabajo_id == trabajo_id).first()
+    if tiene_movimientos:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene pagos registrados. Cancelalo en su lugar.")
+
+    tiene_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
+    if tiene_presupuesto:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: hay un presupuesto convertido a este trabajo.")
+
+    tiene_gastos = db.query(models.Gasto).filter(models.Gasto.trabajo_id == trabajo_id).first()
+    if tiene_gastos:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene gastos asociados.")
+
+    db.query(models.Nota).filter(models.Nota.trabajo_id == trabajo_id).update({"trabajo_id": None})
+    db.delete(db_trabajo)
+    db.commit()
+    return {"mensaje": "Trabajo eliminado"}

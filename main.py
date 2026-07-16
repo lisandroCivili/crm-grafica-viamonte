@@ -19,12 +19,18 @@ app = FastAPI(
     version="2.0",
 )
 
-# Configuración de CORS: Permite que tu archivo HTML de la interfaz
-# se comunique con el servidor de Python sin bloqueos de seguridad
+# Configuración de CORS: solo los orígenes desde donde realmente se abre la
+# interfaz pueden leer respuestas de la API. Antes estaba en "*", lo que
+# permitía que CUALQUIER página web visitada en esta compu leyera la API
+# (incluido /api/backup, o sea, descargarse la base entera).
+ORIGENES_PERMITIDOS = [
+    "http://localhost:5500",   # Live Server de VS Code
+    "http://127.0.0.1:5500",   # Live Server (variante 127.0.0.1)
+    "null",                    # index.html abierto directamente como archivo (file://)
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ORIGENES_PERMITIDOS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

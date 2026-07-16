@@ -1,0 +1,4 @@
+Revisá los endpoints disponibles en la carpeta `routers/` (especialmente clientes, presupuestos y trabajos) y comparalos con la interfaz actual en `frontend/index.html` y `frontend/app.js`.
+Tu objetivo es encontrar "baches funcionales" (CRUD incompleto). 
+Hacé una lista de las acciones que el usuario NO puede hacer actualmente desde la interfaz (por ejemplo: falta botón de editar cliente, falta opción para anular un presupuesto, no se pueden borrar gastos erróneos, etc.).
+Limitá tu análisis a la experiencia de uso. No escribas código todavía, solo devolveme el listado de mejoras funcionales prioritarias.

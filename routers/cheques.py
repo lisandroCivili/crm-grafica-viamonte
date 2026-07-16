@@ -23,12 +23,10 @@ def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, 
     db_cheque = db.query(models.Cheque).filter(models.Cheque.id == cheque_id).first()
     if not db_cheque:
         raise HTTPException(status_code=404, detail="Cheque no encontrado")
-    
-    if update_data.estado is not None:
-        db_cheque.estado = update_data.estado
-    if update_data.destinatario_endoso is not None:
-        db_cheque.destinatario_endoso = update_data.destinatario_endoso
-        
+
+    for key, value in update_data.model_dump(exclude_unset=True).items():
+        setattr(db_cheque, key, value)
+
     db.commit()
     db.refresh(db_cheque)
     return db_cheque

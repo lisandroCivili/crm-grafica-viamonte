@@ -18,6 +18,20 @@ def crear_gasto(gasto: schemas.GastoCreate, db: Session = Depends(get_db)):
     db.refresh(nuevo_gasto)
     return nuevo_gasto
 
+@router.put("/{gasto_id}", response_model=schemas.GastoResponse)
+def actualizar_gasto(gasto_id: str, gasto_update: schemas.GastoUpdate, db: Session = Depends(get_db)):
+    db_gasto = db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
+    if not db_gasto:
+        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+
+    update_data = gasto_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_gasto, key, value)
+
+    db.commit()
+    db.refresh(db_gasto)
+    return db_gasto
+
 @router.delete("/{gasto_id}")
 def eliminar_gasto(gasto_id: str, db: Session = Depends(get_db)):
     db_gasto = db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
