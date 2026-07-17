@@ -1,12 +1,14 @@
 import models
 import os
+import sys
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from database import engine
+from database import engine, BASE_DIR
 # Importamos todos los routers modulares que creamos
 from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth
 
@@ -52,7 +54,7 @@ app.include_router(auth.router)  # Incluimos el router de autenticación
 # ==========================================
 @app.get("/api/backup")
 def descargar_respaldo():
-    db_path = "viamonte.db"
+    db_path = os.path.join(BASE_DIR, "viamonte.db")
     
     # Verificamos que el archivo exista por las dudas
     if not os.path.exists(db_path):
@@ -90,9 +92,48 @@ def login(datos: LoginRequest):
     )
 
 
-@app.get("/")
+@app.get("/api/estado")
 def estado_servidor():
     return {
         "status": "online",
         "msg": "El backend de Gráfica Viamonte está marchando de diez.",
     }
+
+
+# ==========================================
+# FRONTEND (servido por el propio backend)
+# ==========================================
+# Cuando corre empaquetado con PyInstaller (--onefile), los archivos que se
+# agregan con --add-data se extraen a una carpeta temporal en sys._MEIPASS;
+# en desarrollo, usamos la carpeta 'frontend' del proyecto tal cual.
+if getattr(sys, "frozen", False):
+    FRONTEND_DIR = os.path.join(sys._MEIPASS, "frontend")
+else:
+    FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+
+# Se monta al final y en "/" para que no tape ninguna ruta /api/*: FastAPI
+# resuelve las rutas explícitas (los routers de arriba) antes de caer acá.
+# html=True hace que "/" sirva index.html automáticamente.
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+
+
+if __name__ == "__main__":
+    import threading
+    import time
+    import webbrowser
+
+    import uvicorn
+
+    def abrir_navegador():
+        time.sleep(1.5)
+        webbrowser.open("http://127.0.0.1:8000")
+
+    print("=" * 60)
+    print(" Gráfica Viamonte — Sistema iniciando...")
+    print(" En unos segundos se va a abrir solo en el navegador.")
+    print(" NO CIERRES ESTA VENTANA mientras estés trabajando.")
+    print(" Para apagar el sistema, cerrá esta ventana.")
+    print("=" * 60)
+
+    threading.Thread(target=abrir_navegador, daemon=True).start()
+    uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -1,30 +1,294 @@
-# CLAUDE.md
+# CRM Gráfica Viamonte
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Objetivo del proyecto
 
-## Project
+Este proyecto es un CRM desarrollado específicamente para administrar el funcionamiento interno de una gráfica.
+Su objetivo NO es solamente almacenar información.
+Debe ayudar a administrar:
 
-CRM interno para la gestión del taller "Gráfica Viamonte": clientes, trabajos, presupuestos, stock, gastos, cheques y movimientos de caja. Es una app monolítica pensada para correr localmente en la PC del local (no multi-tenant, sin usuarios reales).
+* Clientes
+* Presupuestos
+* Trabajos
+* Producción
+* Pagos
+* Movimientos
+* Gastos
+* Stock
+* Cheques
+* Historial
+El objetivo principal es reducir trabajo manual, mantener trazabilidad y permitir escalar el negocio.
 
-## Architecture
+---
 
-- **Backend**: FastAPI (`main.py`), SQLAlchemy ORM sobre SQLite (`viamonte.db`, archivo en la raíz del repo). `database.py` define el engine/sessionmaker y el helper `get_db()` usado como dependencia en todos los routers.
-- **Modelos** (`models.py`) y **schemas Pydantic** (`schemas.py`) están cada uno en un único archivo grande y plano, no separados por módulo. Al agregar un campo a una entidad hay que tocar ambos archivos (el modelo SQLAlchemy y el/los schema Pydantic correspondientes — Create/Update/Response), además del router.
-- **Routers** (`routers/`): un archivo por entidad (`clientes.py`, `trabajos.py`, `presupuestos.py`, `stock.py`, `gastos.py`, `cheques.py`, `movimientos.py`, `notas.py`, `auth.py`), cada uno con su propio `APIRouter(prefix="/api/...")`, montado en `main.py`. `routers/respaldo.py` está comentado/deshabilitado — la ruta de backup real vive directamente en `main.py` (`GET /api/backup`).
-- **Relaciones clave**: `Cliente` → `Trabajo` (1-N), `Trabajo` → `Nota` (1-N), `Cliente` → `Movimiento` (pagos). `Presupuesto` tiene auto-referencia (`version_de`) para versionado/historial de duplicados y puede vincularse a un `Trabajo` una vez convertido (`convertido_a_trabajo`). `Gasto` puede opcionalmente asociarse a un `Trabajo`. `ArticuloStock` tiene `HistorialStock` para auditar ajustes de cantidad.
-- **IDs**: todas las tablas usan UUID string como PK (`default=lambda: str(uuid.uuid4())`), no autoincrement.
-- **Frontend**: HTML/CSS/JS plano sin build step, en `frontend/` (`index.html`, `app.js`, `style.css`). SPA de una sola página con tabs (`switchTab`), consume la API vía `fetch` contra `API_URL = 'http://localhost:8000/api'` (hardcodeado). Usa SweetAlert2 (`Swal`) para diálogos/alertas.
-- **Auth**: extremadamente simple e intencionalmente hardcodeada (usuario/contraseña fijos `admin` / `viamonte2026`), sin tokens ni hashing — existe solo como candado básico para uso local. Hay dos endpoints de login duplicados: `POST /api/login` (en `main.py`) y `POST /api/auth/login` (en `routers/auth.py`); el frontend usa el segundo. La sesión se persiste en `localStorage` del browser (`viamonte_sesion`), no hay JWT/cookies de servidor.
-- **CORS** está abierto a `*` — asumido seguro porque corre solo en localhost.
+# Stack Tecnológico
 
-## Running the app
+Backend
 
-Backend (desde la raíz del repo):
-```
-uvicorn main:app --reload
-```
-Esto crea automáticamente las tablas en `viamonte.db` si no existen (`models.Base.metadata.create_all` en `main.py`).
+* FastAPI
+* SQLAlchemy
+* Pydantic v2
+* SQLite (actualmente)
+Frontend
+* HTML
+* CSS
+* JavaScript
+Lenguaje
+* Python 3
 
-Frontend: abrir `frontend/index.html` directamente en el navegador (no hay bundler/dev server; asume que el backend corre en `localhost:8000`).
+---
 
-No hay suite de tests, linter ni configuración de CI en el repo.
+# Filosofía del proyecto
+
+La prioridad es la simplicidad.
+No introducir arquitectura compleja sin necesidad.
+Antes de crear nuevas capas o patrones verificar si realmente aportan valor.
+Se privilegia:
+
+* claridad
+* mantenibilidad
+* consistencia
+por encima de la optimización prematura.
+
+---
+
+# Arquitectura actual
+
+Actualmente el proyecto utiliza:
+routers/
+models.py
+schemas.py
+database.py
+main.py
+No existe una carpeta services.
+Mientras no exista:
+
+* la lógica pequeña puede vivir en routers
+* la lógica mediana puede extraerse a funciones privadas
+* si una lógica comienza a crecer demasiado, sugerir moverla a una futura carpeta services, pero NO crearla automáticamente.
+
+---
+
+# Forma correcta de pensar
+
+## SIEMPRE seguir este orden.
+1.
+Entender el problema.
+2.
+Entender el módulo afectado.
+3.
+Leer el modelo SQLAlchemy.
+4.
+Leer el schema Pydantic.
+5.
+Leer el router.
+6.
+Buscar código similar.
+7.
+Recién después escribir código.
+Nunca implementar una solución sin conocer cómo está hecho el resto del sistema.
+
+# Objetivo antes de escribir código
+
+El objetivo NO es solamente que funcione.
+Debe además:
+
+* ser consistente
+* ser legible
+* seguir el estilo existente
+* evitar duplicación
+* respetar la arquitectura
+
+---
+
+# Principios
+
+## Preferir reutilizar antes que crear.
+Preferir funciones pequeñas.
+Preferir nombres descriptivos.
+Evitar funciones enormes.
+Evitar repetir lógica.
+No agregar dependencias innecesarias.
+
+# Modelos
+
+Todos los modelos usan UUID.
+Nunca reemplazar UUID por enteros.
+Las relaciones entre entidades son importantes.
+Antes de modificar un modelo revisar:
+
+* Foreign Keys
+* relationships
+* impacto sobre schemas
+* impacto sobre routers
+
+---
+
+# Schemas
+
+## Todos los cambios realizados sobre modelos deben analizar si afectan:
+Create
+Update
+Response
+Nunca modificar únicamente el modelo.
+
+# Routers
+
+## Los routers representan la API pública.
+No romper endpoints existentes.
+No cambiar nombres de rutas sin motivo.
+Mantener respuestas consistentes.
+Usar siempre:
+HTTPException
+status codes adecuados
+typing
+
+# Convenciones FastAPI
+
+## Siempre utilizar:
+APIRouter
+Depends
+Response Models
+Typing
+Status Codes
+Evitar lógica enorme dentro de endpoints.
+
+# Convenciones SQLAlchemy
+
+## Antes de hacer consultas:
+Pensar si existe riesgo de:
+N+1 Queries
+joins innecesarios
+consultas repetidas
+objetos huérfanos
+Mantener relaciones consistentes.
+
+# Convenciones Pydantic
+
+## Usar model_config.
+No duplicar schemas.
+Si aparece un schema repetido sugerir unificarlo.
+Mantener Create, Update y Response separados.
+
+# Entidades principales
+
+## Cliente
+Representa una persona o empresa.
+Puede tener:
+Trabajos
+Movimientos
+Presupuestos
+Cheques
+Notas
+
+## Trabajo
+Representa una orden de producción.
+Debe mantener:
+estado
+precio
+materiales
+pagos
+notas
+
+## Movimiento
+Representa movimientos económicos.
+Debe ser auditable.
+No eliminar movimientos históricos.
+
+## Presupuesto
+Puede:
+crearse
+duplicarse
+aprobarse
+rechazarse
+convertirse en Trabajo
+
+## Stock
+Debe mantener historial.
+Nunca modificar cantidades sin registrar motivo.
+
+## Cheque
+Puede pasar por distintos estados.
+Nunca perder historial del cambio.
+
+## Gasto
+Puede estar asociado a un Trabajo.
+Debe afectar reportes futuros.
+
+# Reglas generales
+
+## Nunca romper compatibilidad.
+Nunca eliminar campos sin analizar impacto.
+Nunca cambiar nombres públicos.
+No eliminar endpoints.
+No cambiar respuestas JSON sin necesidad.
+
+# Al crear una nueva feature
+
+## Preguntarse:
+¿Qué entidades participan?
+¿Qué routers participan?
+¿Qué schemas participan?
+¿Qué relaciones cambian?
+¿Qué validaciones nuevas aparecen?
+¿Debe actualizar documentación?
+
+# Al modificar código existente
+
+## Antes de tocar cualquier archivo:
+Buscar referencias.
+Buscar imports.
+Buscar routers relacionados.
+Buscar schemas relacionados.
+Buscar relaciones SQLAlchemy.
+
+# Qué evitar
+
+## No reescribir archivos completos.
+No cambiar estilo del proyecto.
+No introducir patrones nuevos sin justificar.
+No agregar dependencias por comodidad.
+No optimizar código que aún no representa un problema.
+
+# Cuando existan varias soluciones
+
+## Elegir la que:
+Sea más simple.
+Sea consistente con el proyecto.
+Sea fácil de mantener.
+
+# Código
+
+## Priorizar:
+claridad
+legibilidad
+consistencia
+antes que "código inteligente".
+
+# Si detectás deuda técnica
+
+No modificar automáticamente.
+Primero informar:
+
+* problema
+* impacto
+* propuesta
+* ventajas
+* desventajas
+Luego esperar aprobación.
+
+---
+
+# Documentación
+
+## Cuando se cree una nueva entidad:
+Actualizar docs correspondientes.
+Cuando cambie una regla de negocio:
+Actualizar documentación.
+
+# Objetivo final
+
+Todo cambio realizado debe dejar el proyecto:
+Más consistente.
+Más mantenible.
+Más claro.
+Nunca solamente "funcionando".

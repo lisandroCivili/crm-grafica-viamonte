@@ -1,4 +1,6 @@
-const API_URL = 'http://localhost:8000/api';
+// Ruta relativa: el frontend ahora lo sirve el mismo backend (FastAPI monta
+// esta carpeta), así que siempre está en el mismo origen que la API.
+const API_URL = '/api';
 let clienteActualFicha = null; // Guardamos qué cliente está abierto
 
 // ==========================================

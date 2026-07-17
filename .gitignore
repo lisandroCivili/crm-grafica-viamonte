@@ -16,3 +16,8 @@ venv/
 
 # Variables de entorno
 .env
+
+# PyInstaller (empaquetado del .exe)
+build/
+dist/
+*.spec
