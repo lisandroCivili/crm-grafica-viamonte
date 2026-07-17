@@ -5,6 +5,10 @@ from sqlalchemy.orm import relationship
 from database import Base
 from money import Money, Cantidad
 
+# Estados por los que puede pasar un Trabajo. Única fuente de verdad: el router
+# valida contra esta lista y el frontend arma el Kanban con estos mismos nombres.
+ESTADOS_TRABAJO = ["Aprobado", "En Diseño", "En Producción", "Entregado", "Cancelado"]
+
 class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
@@ -32,8 +36,35 @@ class Trabajo(Base):
     forma_pago_heredada = Column(String, nullable=True)
     notas_iniciales = Column(Text, nullable=True) # <-- Nota opcional al crear
 
+    # --- Datos de la boleta física (orden de producción) ---
+    # La "descripción" de la boleta es descripcion_producto, definido arriba.
+    medida_terminado = Column(String, nullable=True)
+    medida_pliego = Column(String, nullable=True)
+    corte_pliego = Column(String, nullable=True)
+    tintas = Column(String, nullable=True)
+    troquelado = Column(String, nullable=True)
+    barniz = Column(String, nullable=True)
+    otros = Column(Text, nullable=True)
+
+    # El papel se guarda dos veces a propósito y no es duplicación:
+    # - papel_tipo es lo que se lee en la boleta (texto libre).
+    # - papel_id es opcional y sólo existe para saber QUÉ descontar del stock.
+    # Si el papel lo trae el cliente o se compra en el momento, hay texto sin FK
+    # y al imprimir la orden no se descuenta nada.
+    papel_tipo = Column(String, nullable=True)
+    papel_id = Column(String, ForeignKey("stock.id"), nullable=True)
+    cantidad_pliegos = Column(Cantidad, nullable=True) # consumo de papel (cantidad = unidades terminadas)
+
+    # --- Emisión de la orden ---
+    # orden_impresa es el guard de idempotencia: el stock se descuenta una sola
+    # vez, cuando pasa de False a True. Reimprimir sólo regenera el PDF.
+    orden_impresa = Column(Boolean, default=False)
+    numero_orden = Column(String, index=True, nullable=True) # se asigna recién al imprimir
+    fecha_orden_impresa = Column(DateTime, nullable=True)
+
     cliente = relationship("Cliente", back_populates="trabajos")
     notas = relationship("Nota", back_populates="trabajo")
+    papel = relationship("ArticuloStock")
 
 class Movimiento(Base):
     __tablename__ = "movimientos"
@@ -61,12 +92,18 @@ class Nota(Base):
 class Presupuesto(Base):
     __tablename__ = "presupuestos"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
+    # Opcional: un presupuesto se puede guardar como borrador sin cliente asignado
+    # todavía. Se le carga el cliente más adelante, antes de convertirlo a trabajo.
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=True)
     trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True) # Para sincronizar estado
     version_de = Column(String, ForeignKey("presupuestos.id"), nullable=True) # Para el historial de duplicados
     numero_secuencia = Column(String, index=True, nullable=True) # Ej: "0001-000015" (número de comprobante)
     descripcion = Column(String, nullable=False)
     cantidad = Column(Integer, nullable=False)
+    # Datos del material que se lee en el presupuesto y alimentan el informe de
+    # trabajos. Texto libre (mismo criterio que papel_tipo en Trabajo).
+    material = Column(String, nullable=True)   # tipo de papel
+    gramaje = Column(String, nullable=True)    # g/m²
     costo_materiales = Column(Money, nullable=False)
     detalles_costos = Column(JSON, nullable=True)
     margen_ganancia = Column(Money, nullable=False)
@@ -87,6 +124,8 @@ class Gasto(Base):
     fecha = Column(Date, nullable=False)
     metodo_pago = Column(String, default="Efectivo")     # <-- NUEVO
     comprobante = Column(String, default="Sin comprobante") # <-- NUEVO
+    # Quién autorizó/hizo el gasto. 'General' es el gasto del taller sin dueño puntual.
+    responsable = Column(String, default="General")
 
 class ArticuloStock(Base):
     __tablename__ = "stock"
@@ -99,6 +138,11 @@ class ArticuloStock(Base):
     stock_minimo = Column(Cantidad, default=5)
     costo_unitario = Column(Money, default=0)
     ultima_actualizacion = Column(Date, nullable=False)
+    # Dimensiones del papel (sólo papeles comprados por peso): permiten
+    # recalcular pliegos en recompras sin volver a tipear los datos.
+    largo_cm = Column(Cantidad, nullable=True)
+    ancho_cm = Column(Cantidad, nullable=True)
+    gramaje_grs = Column(Cantidad, nullable=True)
 
 class HistorialStock(Base):
     __tablename__ = "historial_stock"
@@ -112,10 +156,16 @@ class Cheque(Base):
     __tablename__ = "cheques"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     cliente_id = Column(String, ForeignKey("clientes.id"), nullable=True)
+    # Recibido: cheque de un cliente (entra plata al cobrarse).
+    # Emitido: cheque propio para pagarle a un proveedor (sale plata).
+    clasificacion = Column(String, default="Recibido")
+    # Opcional: trabajo al que se imputa el cobro de un cheque Recibido. Permite
+    # calcular la ganancia proporcional cuando el cheque se marca 'Cobrado'.
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
     banco = Column(String, nullable=False)
     numero = Column(String, nullable=False)
     monto = Column(Money, nullable=False)
     fecha_emision = Column(Date, nullable=False)
     fecha_cobro = Column(Date, nullable=False)
-    estado = Column(String, default="En Cartera") # En Cartera, Depositado, Endosado, Rechazado
+    estado = Column(String, default="En Cartera") # En Cartera, Depositado, Cobrado, Endosado, Rechazado
     destinatario_endoso = Column(String, nullable=True)

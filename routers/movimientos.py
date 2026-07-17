@@ -17,6 +17,10 @@ def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db
     if mov.tipo == "Pago" and mov.monto <= Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto del pago debe ser mayor a 0.")
 
+    # Todo pago debe imputarse a un trabajo: así aporta a la ganancia del trabajo.
+    if mov.tipo == "Pago" and not mov.trabajo_id:
+        raise HTTPException(status_code=400, detail="El pago debe estar asociado a un trabajo.")
+
     nuevo = models.Movimiento(**mov.model_dump())
     db.add(nuevo)
     db.commit()
@@ -28,7 +32,9 @@ def obtener_saldo(cliente_id: str, db: Session = Depends(get_db)):
     # Saldo calculado por el backend: fuente de verdad única.
     trabajos = db.query(models.Trabajo).filter(models.Trabajo.cliente_id == cliente_id).all()
     movimientos = db.query(models.Movimiento).filter(models.Movimiento.cliente_id == cliente_id).all()
-    total_facturado, total_pagado, saldo = calcular_saldo_cliente(trabajos, movimientos)
+    # Un pago con cheque salda la deuda: los cheques recibidos también cuentan.
+    cheques = db.query(models.Cheque).filter(models.Cheque.cliente_id == cliente_id).all()
+    total_facturado, total_pagado, saldo = calcular_saldo_cliente(trabajos, movimientos, cheques)
     return schemas.SaldoResponse(
         cliente_id=cliente_id,
         total_facturado=total_facturado,

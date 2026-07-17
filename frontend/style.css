@@ -185,3 +185,6 @@ tr:hover td { background: var(--magenta-soft); }
 .costo-row { display: flex; justify-content: space-between; align-items: center; }
 .costo-row label { font-size: 13px; color: var(--ink); }
 .costo-row input { width: 120px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; text-align: right; }
+
+/* Oculta las acciones de las tarjetas sólo mientras se captura la hoja de ruta en PDF. */
+.kanban-board.ocultar-acciones .no-print { display: none !important; }

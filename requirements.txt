@@ -2,3 +2,4 @@ fastapi==0.135.3
 uvicorn==0.44.0
 SQLAlchemy==2.0.50
 pydantic==2.12.4
+reportlab==5.0.0

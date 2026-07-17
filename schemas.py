@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
@@ -34,15 +34,33 @@ class ClienteUpdate(BaseModel):
 # --- ESQUEMAS PARA TRABAJOS ---
 class TrabajoBase(BaseModel):
     cliente_id: str
-    descripcion_producto: str
-    cantidad: int
-    estado: Optional[str] = "Pendiente de Pago"
+    # El alta de trabajo ya no exige descripción, cantidad de unidades, costo de
+    # materiales ni forma de pago desde el formulario: el trabajo se cuenta por
+    # pliegos y esos datos pasaron a ser opcionales. Se mantienen las columnas
+    # (NOT NULL en el modelo) con defaults para no romper filas ni la creación
+    # desde otros orígenes (p. ej. conversión de presupuesto, que sí los manda).
+    descripcion_producto: str = ""
+    cantidad: int = 1
+    estado: Optional[str] = "Aprobado"
     fecha_creacion: date
     fecha_comienzo: Optional[date] = None
     fecha_entrega: Optional[date] = None
     precio_venta: Decimal
-    costo_total_materiales: Decimal
+    costo_total_materiales: Decimal = Decimal("0")
     forma_pago_heredada: Optional[str] = None
+
+    # Datos de la boleta física. Todos opcionales: un trabajo se puede dar de
+    # alta sin la parte productiva y completarla después.
+    medida_terminado: Optional[str] = None
+    medida_pliego: Optional[str] = None
+    corte_pliego: Optional[str] = None
+    tintas: Optional[str] = None
+    troquelado: Optional[str] = None
+    barniz: Optional[str] = None
+    otros: Optional[str] = None
+    papel_tipo: Optional[str] = None
+    papel_id: Optional[str] = None
+    cantidad_pliegos: Optional[Decimal] = None
 
 class TrabajoCreate(TrabajoBase):
     pass
@@ -54,20 +72,63 @@ class TrabajoUpdate(BaseModel):
     descripcion_producto: Optional[str] = None
     cantidad: Optional[int] = None
     precio_venta: Optional[Decimal] = None
+    medida_terminado: Optional[str] = None
+    medida_pliego: Optional[str] = None
+    corte_pliego: Optional[str] = None
+    tintas: Optional[str] = None
+    troquelado: Optional[str] = None
+    barniz: Optional[str] = None
+    otros: Optional[str] = None
+    papel_tipo: Optional[str] = None
+    papel_id: Optional[str] = None
+    cantidad_pliegos: Optional[Decimal] = None
 
 class TrabajoResponse(TrabajoBase):
     id: str
+    # Campos de solo lectura: los controla el backend al imprimir la orden,
+    # por eso no están en TrabajoBase (nadie los manda desde afuera).
+    orden_impresa: bool = False
+    numero_orden: Optional[str] = None
+    fecha_orden_impresa: Optional[datetime] = None
     model_config = {"from_attributes": True}
+
+# Datos que se piden al pasar un trabajo de Aprobado a En Diseño.
+class IniciarDisenoRequest(BaseModel):
+    monto: Decimal
+    metodo: Optional[str] = None
+    motivo: Optional[str] = None
+    # Sólo cuando la seña se abona con cheque: se crea un Cheque recibido en vez
+    # de un Movimiento (no cuenta como ingreso hasta cobrarse).
+    banco: Optional[str] = None
+    numero: Optional[str] = None
+    fecha_cobro: Optional[date] = None
+
+    @model_validator(mode="after")
+    def validar_monto_y_motivo(self):
+        if self.monto < Decimal("0"):
+            raise ValueError("El monto abonado no puede ser negativo.")
+        # Se puede arrancar el diseño sin seña, pero hay que justificar por qué.
+        if self.monto == Decimal("0") and not (self.motivo or "").strip():
+            raise ValueError("Si no hay monto abonado, el motivo es obligatorio.")
+        # Si la seña es con cheque, necesitamos los datos mínimos del cheque.
+        if self.monto > Decimal("0") and (self.metodo or "") == "Cheque":
+            faltan = [c for c in ("banco", "numero", "fecha_cobro") if not getattr(self, c)]
+            if faltan:
+                raise ValueError(f"Para una seña con cheque faltan datos: {', '.join(faltan)}.")
+        return self
 
 
 # --- ESQUEMAS PARA PRESUPUESTOS ---
 class PresupuestoBase(BaseModel):
-    cliente_id: str
+    # Opcional: permite guardar un borrador sin cliente asignado todavía.
+    cliente_id: Optional[str] = None
     trabajo_id: Optional[str] = None
     version_de: Optional[str] = None
     numero_secuencia: Optional[str] = None
     descripcion: str
     cantidad: int
+    material: Optional[str] = None   # tipo de papel
+    gramaje: Optional[str] = None    # g/m²
     costo_materiales: Decimal
     detalles_costos: Optional[dict] = None
     margen_ganancia: Decimal
@@ -79,6 +140,8 @@ class PresupuestoBase(BaseModel):
 class PresupuestoCreate(PresupuestoBase):
     # El backend recalcula costo_materiales y precio_final a partir de
     # detalles_costos y margen_ganancia, así que estos pueden venir en 0.
+    # trabajo_id (heredado de PresupuestoBase) es opcional: si viene, asocia el
+    # presupuesto a un trabajo ya creado que todavía no tenía presupuesto.
     costo_materiales: Decimal = Decimal("0")
     precio_final: Decimal = Decimal("0")
 
@@ -86,11 +149,32 @@ class PresupuestoResponse(PresupuestoBase):
     id: str
     model_config = {"from_attributes": True}
 
+# Fila del "Informe general de trabajos a clientes". Se arma a partir de los
+# presupuestos, cruzando el trabajo asociado (si ya se convirtió). Los campos
+# vienen listos para renderizar en la tabla del PDF; "Pendiente"/"-"/"" según
+# corresponda para los presupuestos que todavía no son trabajo.
+class InformeTrabajoRow(BaseModel):
+    nro_trabajo: str
+    fecha_entrada: str
+    cliente: str
+    descripcion_material: str
+    gramaje: str
+    colores: str
+    cantidad: int
+    fecha_entrega: str
+    dias_produccion: str
+    estado: str
+    cobrado: bool
+    observaciones: str
+
+
 # Esquema para EDITAR un presupuesto existente (no se permite tocar convertido_a_trabajo/trabajo_id acá)
 class PresupuestoUpdate(BaseModel):
     cliente_id: Optional[str] = None
     descripcion: Optional[str] = None
     cantidad: Optional[int] = None
+    material: Optional[str] = None
+    gramaje: Optional[str] = None
     detalles_costos: Optional[dict] = None
     margen_ganancia: Optional[Decimal] = None
     estado: Optional[str] = None
@@ -143,6 +227,7 @@ class GastoBase(BaseModel):
     fecha: date
     metodo_pago: str = "Efectivo"
     comprobante: str = "Sin comprobante"
+    responsable: str = "General"
     trabajo_id: Optional[str] = None
 
 class GastoCreate(GastoBase):
@@ -160,6 +245,7 @@ class GastoUpdate(BaseModel):
     fecha: Optional[date] = None
     metodo_pago: Optional[str] = None
     comprobante: Optional[str] = None
+    responsable: Optional[str] = None
     trabajo_id: Optional[str] = None
 
 
@@ -173,6 +259,9 @@ class StockBase(BaseModel):
     stock_minimo: Decimal
     costo_unitario: Decimal
     ultima_actualizacion: date
+    largo_cm: Optional[Decimal] = None
+    ancho_cm: Optional[Decimal] = None
+    gramaje_grs: Optional[Decimal] = None
 
 class StockCreate(StockBase):
     pass
@@ -186,7 +275,31 @@ class StockUpdate(BaseModel):
     cantidad: Optional[Decimal] = None
     costo_unitario: Optional[Decimal] = None
     ultima_actualizacion: Optional[date] = None
+    largo_cm: Optional[Decimal] = None
+    ancho_cm: Optional[Decimal] = None
+    gramaje_grs: Optional[Decimal] = None
     motivo: Optional[str] = "Ajuste rápido"
+
+class CompraStockItem(BaseModel):
+    """Ítem del carrito de compras de stock.
+
+    Con articulo_id es una recompra (suma cantidad al artículo existente);
+    sin articulo_id es un alta nueva. Si unidad == 'Kg' el backend convierte
+    el peso a pliegos usando largo/ancho/gramaje (ver routers/stock.py).
+    """
+    articulo_id: Optional[str] = None
+    nombre: Optional[str] = None
+    categoria: Optional[str] = "General"
+    proveedor: Optional[str] = None
+    unidad: Optional[str] = None
+    cantidad: Optional[Decimal] = None
+    stock_minimo: Optional[Decimal] = None
+    costo_unitario: Optional[Decimal] = None
+    costo_total: Optional[Decimal] = None
+    largo_cm: Optional[Decimal] = None
+    ancho_cm: Optional[Decimal] = None
+    gramaje_grs: Optional[Decimal] = None
+    peso_total_kg: Optional[Decimal] = None
 
 class StockResponse(StockBase):
     id: str
@@ -204,6 +317,8 @@ class HistorialStockResponse(BaseModel):
 # --- ESQUEMAS PARA CHEQUES ---
 class ChequeBase(BaseModel):
     cliente_id: Optional[str] = None
+    clasificacion: str = "Recibido"   # 'Recibido' (de cliente) o 'Emitido' (a proveedor)
+    trabajo_id: Optional[str] = None
     banco: str
     numero: str
     monto: Decimal
@@ -217,6 +332,8 @@ class ChequeCreate(ChequeBase):
 
 class ChequeUpdate(BaseModel):
     cliente_id: Optional[str] = None
+    clasificacion: Optional[str] = None
+    trabajo_id: Optional[str] = None
     banco: Optional[str] = None
     numero: Optional[str] = None
     monto: Optional[Decimal] = None
@@ -236,3 +353,17 @@ class SaldoResponse(BaseModel):
     total_facturado: Decimal
     total_pagado: Decimal
     saldo: Decimal
+
+
+# --- ESQUEMA PARA EL DASHBOARD (KPIs financieros calculados por el backend) ---
+class DashboardResponse(BaseModel):
+    # Plata realmente cobrada en el período (pagos no-cheque + cheques cobrados).
+    ingresos: Decimal
+    # Gastos del período.
+    egresos: Decimal
+    # Suma de la ganancia proporcional a lo cobrado de cada trabajo con
+    # presupuesto, menos los gastos del período.
+    ganancia_neta: Decimal
+    # Conteos actuales (snapshot, no dependen del período).
+    trabajos_pendientes: int
+    trabajos_sin_presupuesto: int
