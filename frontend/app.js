@@ -217,9 +217,9 @@ async function abrirFicha(id) {
             const shortId = t.id.substring(0,6).toUpperCase();
             const pagosDeEsteTrabajo = movimientos
                 .filter(m => m.tipo === 'Pago' && m.trabajo_id === t.id)
-                .reduce((suma, m) => suma + m.monto, 0);
+                .reduce((suma, m) => suma + Number(m.monto), 0);
 
-            const saldoTrabajo = t.precio_venta - pagosDeEsteTrabajo;
+            const saldoTrabajo = Number(t.precio_venta) - pagosDeEsteTrabajo;
             const textoPago = saldoTrabajo <= 0
                 ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>'
                 : `<span style="color:var(--red); font-weight:600;">Debe: $${fmtMoney(saldoTrabajo)}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${fmtMoney(pagosDeEsteTrabajo)})</span>`;
@@ -304,7 +304,7 @@ async function abrirDrawerPago() {
 
         trabajosCliente.forEach(t => {
             const shortId = t.id.substring(0,6).toUpperCase();
-            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto} (Total: $${t.precio_venta})</option>`;
+            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto} (Total: $${fmtMoney(t.precio_venta)})</option>`;
         });
     } catch(e) { console.error(e); }
 
@@ -684,33 +684,24 @@ async function cargarClientes(filtro = "") {
         let url = `${API_URL}/clientes/`;
         if (filtro) url += `?buscar=${filtro}`;
 
-        // Ahora pedimos TODO de una para que la matemática sea exacta
-        const [respC, respT, respM] = await Promise.all([
+        // El saldo lo calcula el backend (mismo cálculo que la ficha, cheques incluidos).
+        const [respC, respS] = await Promise.all([
             fetch(url),
-            fetch(`${API_URL}/trabajos/`),
-            fetch(`${API_URL}/movimientos/`)
+            fetch(`${API_URL}/clientes/saldos`)
         ]);
-        
+
         const clientes = await respC.json();
-        const trabajos = await respT.json();
-        const movimientos = await respM.json();
-        
+        const saldos = respS.ok ? await respS.json() : [];
+
+        const saldoPorCliente = {};
+        saldos.forEach(s => saldoPorCliente[s.cliente_id] = Number(s.saldo)); // Decimal llega como string
+
         const tbody = document.querySelector('#tableClientes tbody');
         if (!tbody) return;
-        
+
         tbody.innerHTML = '';
         clientes.forEach(cliente => {
-            // Lógica unificada: Lo facturado menos lo pagado real
-            const trabajosCliente = trabajos.filter(t => t.cliente_id === cliente.id);
-            const movsCliente = movimientos.filter(m => m.cliente_id === cliente.id);
-            
-            // Misma lógica que el backend (calcular_saldo_cliente): se excluyen los trabajos Cancelados.
-            const totalFacturado = trabajosCliente
-                .filter(t => t.estado !== 'Cancelado')
-                .reduce((suma, t) => suma + Number(t.precio_venta), 0);
-            const totalPagado = movsCliente.filter(m => m.tipo === 'Pago').reduce((suma, m) => suma + Number(m.monto), 0);
-
-            const saldoReal = totalFacturado - totalPagado;
+            const saldoReal = saldoPorCliente[cliente.id] ?? 0;
             const colorSaldo = saldoReal > 0 ? "var(--red)" : "var(--green)";
 
             tbody.innerHTML += `
@@ -1560,29 +1551,33 @@ async function convertirATrabajo(presupuesto_id, button) {
         const respP = await fetch(`${API_URL}/presupuestos/`);
         const presupuestos = await respP.json();
         const p = presupuestos.find(x => x.id === presupuesto_id);
+        if (!p) throw new Error("No se encontró el presupuesto.");
+
+        if (!p.cliente_id) {
+            Swal.fire('Falta el cliente', 'Asigná un cliente al presupuesto antes de convertirlo a trabajo.', 'warning');
+            return;
+        }
 
         let cancelarAnterior = false;
-        if (p.version_de) {
-            const madre = presupuestos.find(x => x.id === p.version_de);
+        const madre = p.version_de ? presupuestos.find(x => x.id === p.version_de) : null;
 
-            if (madre && madre.trabajo_id) {
-                const accion = await Swal.fire({
-                    title: 'Presupuesto Duplicado',
-                    text: 'Este presupuesto es una corrección/versión de otro anterior. ¿Qué hacemos con el trabajo original?',
-                    icon: 'question',
-                    showDenyButton: true,
-                    showCancelButton: true,
-                    confirmButtonText: 'Cancelar el anterior',
-                    denyButtonText: 'Mantener ambos',
-                    cancelButtonText: 'Abortar',
-                    confirmButtonColor: '#D5006D',
-                    denyButtonColor: '#555'
-                });
+        if (madre && madre.trabajo_id) {
+            const accion = await Swal.fire({
+                title: 'Presupuesto Duplicado',
+                text: 'Este presupuesto es una corrección/versión de otro anterior. ¿Qué hacemos con el trabajo original?',
+                icon: 'question',
+                showDenyButton: true,
+                showCancelButton: true,
+                confirmButtonText: 'Cancelar el anterior',
+                denyButtonText: 'Mantener ambos',
+                cancelButtonText: 'Abortar',
+                confirmButtonColor: '#D5006D',
+                denyButtonColor: '#555'
+            });
 
-                if (accion.isDismissed) return;
-                if (accion.isConfirmed) cancelarAnterior = true;
-            }
-        } else {
+            if (accion.isDismissed) return;
+            if (accion.isConfirmed) cancelarAnterior = true;
+        } else if (!p.version_de) {
             const confirmacion = await Swal.fire({
                 title: '¿Pasar a Trabajo?',
                 text: "Esto enviará el presupuesto al Kanban de producción.",
@@ -1595,39 +1590,40 @@ async function convertirATrabajo(presupuesto_id, button) {
             if (!confirmacion.isConfirmed) return;
         }
 
-        const dataTrabajo = {
-            cliente_id: p.cliente_id,
-            descripcion_producto: p.descripcion,
-            cantidad: p.cantidad,
-            precio_venta: p.precio_final,
-            costo_total_materiales: p.costo_materiales,
-            notas_iniciales: `Viene de presupuesto autom.`,
-            fecha_creacion: new Date().toISOString().split('T')[0],
-            estado: "Aprobado"
-        };
+        // El backend crea el trabajo y marca el presupuesto en una sola transacción.
+        const resp = await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "No se pudo convertir el presupuesto.");
+        }
 
-        const respT = await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataTrabajo) });
-        const nuevoTrabajo = await respT.json();
-
-        await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir/${nuevoTrabajo.id}`, { method: 'PUT' });
-
+        // La conversión ya está hecha: si falla la cancelación del trabajo
+        // anterior avisamos, pero no la reportamos como fallida.
+        let avisoCancelacion = '';
         if (cancelarAnterior) {
-            const madre = presupuestos.find(x => x.id === p.version_de);
-
-            await fetch(`${API_URL}/trabajos/${madre.trabajo_id}`, {
+            const respCancel = await fetch(`${API_URL}/trabajos/${madre.trabajo_id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ estado: "Cancelado" })
             });
-
+            if (!respCancel.ok) {
+                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo a mano desde el Kanban.';
+            }
             // (Se eliminó el Movimiento monto:0 de "cancelado por corrección": no es plata real.)
         }
 
         cargarTrabajos();
         cargarPresupuestos();
-        Swal.fire('¡Enviado!', 'El trabajo ya está en el tablero.', 'success');
+        if (avisoCancelacion) {
+            Swal.fire('Atención', avisoCancelacion, 'warning');
+        } else {
+            Swal.fire('¡Enviado!', 'El trabajo ya está en el tablero.', 'success');
+        }
 
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('No se pudo convertir', e.message, 'error');
+    }
     finally {
         if (button) {
             button.disabled = false;
@@ -2455,7 +2451,7 @@ async function cargarStock() {
         stock.forEach(s => {
             // Cálculos para la cabecera
             capitalTotal += (Number(s.cantidad) * Number(s.costo_unitario));
-            const enAlerta = s.cantidad <= s.stock_minimo;
+            const enAlerta = Number(s.cantidad) <= Number(s.stock_minimo);
             if (enAlerta) alertasTotales++;
 
             // REEMPLAZAR DECLARACIÓN DE badgeEstado EN cargarStock()
@@ -2736,6 +2732,19 @@ async function cargarDashboard() {
             totalEgresos += Number(g.monto);
             gastosPorCat[g.categoria] = (gastosPorCat[g.categoria] || 0) + Number(g.monto);
         });
+
+        // Morosos y "plata en la calle": fuente de verdad en el backend (incluye
+        // cheques recibidos no rechazados, igual que el saldo de la ficha). El
+        // cálculo local de arriba queda solo como fallback.
+        if (kpis) {
+            plataEnLaCalle = Number(kpis.plata_en_la_calle);
+            htmlMorosos = kpis.morosos.map(m => `
+                <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
+                    <span><b>#${m.trabajo_id.substring(0,6).toUpperCase()}</b> - ${m.descripcion_producto}</span>
+                    <span style="color:var(--red); font-weight:bold;">$ ${fmtMoney(Number(m.saldo_pendiente))}</span>
+                </div>
+            `).join('');
+        }
 
         // Ingresos, egresos y ganancia salen del backend (única fuente de verdad):
         // ingresos = plata realmente cobrada; ganancia = margen proporcional a lo

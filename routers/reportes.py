@@ -1,11 +1,13 @@
+from collections import defaultdict
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 import models, schemas
 from database import get_db
-from calculos import ingresos_reales, ganancia_bruta_realizada, total_gastos
+from calculos import ingresos_reales, ganancia_bruta_realizada, total_gastos, calcular_saldo_trabajo
 
 router = APIRouter(prefix="/api/reportes", tags=["Reportes"])
 
@@ -64,10 +66,38 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
         if t.estado != "Cancelado" and t.id not in ids_con_presupuesto
     )
 
+    # Morosos: trabajos entregados del período con saldo sin cobrar. El saldo
+    # incluye cheques recibidos no rechazados, igual que la ficha del cliente.
+    movs_por_trabajo = defaultdict(list)
+    for m in movimientos:
+        if m.trabajo_id:
+            movs_por_trabajo[m.trabajo_id].append(m)
+
+    cheques_por_trabajo = defaultdict(list)
+    for ch in cheques:
+        if ch.trabajo_id:
+            cheques_por_trabajo[ch.trabajo_id].append(ch)
+
+    plata_en_la_calle = Decimal("0")
+    morosos = []
+    for t in trabajos:
+        if t.estado != "Entregado" or not en_periodo(t.fecha_creacion):
+            continue
+        saldo = calcular_saldo_trabajo(t.precio_venta, movs_por_trabajo[t.id], cheques_por_trabajo[t.id])
+        if saldo > 0:
+            plata_en_la_calle += saldo
+            morosos.append(schemas.MorosoResponse(
+                trabajo_id=t.id,
+                descripcion_producto=t.descripcion_producto,
+                saldo_pendiente=saldo,
+            ))
+
     return schemas.DashboardResponse(
         ingresos=ingresos,
         egresos=egresos,
         ganancia_neta=ganancia_neta,
         trabajos_pendientes=trabajos_pendientes,
         trabajos_sin_presupuesto=trabajos_sin_presupuesto,
+        plata_en_la_calle=plata_en_la_calle,
+        morosos=morosos,
     )

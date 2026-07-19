@@ -1,7 +1,10 @@
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
+from calculos import calcular_saldo_cliente
 import uuid
 
 # Instanciamos el router específico para Clientes
@@ -41,6 +44,46 @@ def listar_clientes(buscar: str = None, db: Session = Depends(get_db)):
         )
 
     return query.all()
+
+# OJO: si algún día se agrega GET /{cliente_id}, esta ruta debe declararse antes
+# para que "saldos" no se interprete como un id de cliente.
+@router.get("/saldos", response_model=list[schemas.SaldoResponse])
+def saldos_clientes(db: Session = Depends(get_db)):
+    """Saldo de todos los clientes en una sola respuesta.
+
+    Única fuente de verdad para el listado de clientes: mismo cálculo que la
+    ficha (calcular_saldo_cliente, que incluye cheques recibidos no rechazados).
+    Una consulta por tabla y cruce en memoria, sin N+1.
+    """
+    clientes = db.query(models.Cliente).all()
+
+    trabajos_por_cliente = defaultdict(list)
+    for t in db.query(models.Trabajo).all():
+        trabajos_por_cliente[t.cliente_id].append(t)
+
+    movs_por_cliente = defaultdict(list)
+    for m in db.query(models.Movimiento).all():
+        movs_por_cliente[m.cliente_id].append(m)
+
+    cheques_por_cliente = defaultdict(list)
+    for ch in db.query(models.Cheque).all():
+        if ch.cliente_id:  # Los cheques emitidos pueden no tener cliente.
+            cheques_por_cliente[ch.cliente_id].append(ch)
+
+    saldos = []
+    for c in clientes:
+        total_facturado, total_pagado, saldo = calcular_saldo_cliente(
+            trabajos_por_cliente[c.id],
+            movs_por_cliente[c.id],
+            cheques_por_cliente[c.id],
+        )
+        saldos.append(schemas.SaldoResponse(
+            cliente_id=c.id,
+            total_facturado=total_facturado,
+            total_pagado=total_pagado,
+            saldo=saldo,
+        ))
+    return saldos
 
 @router.put("/{cliente_id}", response_model=schemas.ClienteResponse)
 def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, db: Session = Depends(get_db)):

@@ -356,6 +356,12 @@ class SaldoResponse(BaseModel):
 
 
 # --- ESQUEMA PARA EL DASHBOARD (KPIs financieros calculados por el backend) ---
+class MorosoResponse(BaseModel):
+    trabajo_id: str
+    descripcion_producto: str
+    saldo_pendiente: Decimal
+
+
 class DashboardResponse(BaseModel):
     # Plata realmente cobrada en el período (pagos no-cheque + cheques cobrados).
     ingresos: Decimal
@@ -367,3 +373,7 @@ class DashboardResponse(BaseModel):
     # Conteos actuales (snapshot, no dependen del período).
     trabajos_pendientes: int
     trabajos_sin_presupuesto: int
+    # Trabajos entregados del período con saldo sin cobrar (incluye cheques
+    # recibidos no rechazados como pago, igual que el saldo de la ficha).
+    plata_en_la_calle: Decimal = Decimal("0")
+    morosos: list[MorosoResponse] = []

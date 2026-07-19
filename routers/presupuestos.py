@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -207,11 +208,65 @@ def eliminar_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
     return {"mensaje": "Presupuesto eliminado"}
 
 
+@router.post("/{presupuesto_id}/convertir", response_model=schemas.TrabajoResponse)
+def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
+    """Convierte un presupuesto en trabajo en una sola transacción.
+
+    Crea el trabajo y marca el presupuesto como convertido con un único commit:
+    si algo falla en el medio no queda ni trabajo huérfano ni presupuesto
+    marcado a medias.
+    """
+    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
+    if not db_presupuesto:
+        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+
+    if not db_presupuesto.cliente_id:
+        raise HTTPException(status_code=400, detail="Asigná un cliente al presupuesto antes de convertirlo.")
+
+    if db_presupuesto.convertido_a_trabajo or db_presupuesto.trabajo_id:
+        raise HTTPException(status_code=409, detail="Este presupuesto ya fue convertido a trabajo.")
+
+    nuevo_trabajo = models.Trabajo(
+        cliente_id=db_presupuesto.cliente_id,
+        descripcion_producto=db_presupuesto.descripcion,
+        cantidad=db_presupuesto.cantidad,
+        precio_venta=db_presupuesto.precio_final,
+        costo_total_materiales=db_presupuesto.costo_materiales,
+        notas_iniciales=f"Viene del presupuesto {db_presupuesto.numero_secuencia or 's/n'}",
+        fecha_creacion=date.today(),
+        estado="Aprobado",
+    )
+    db.add(nuevo_trabajo)
+    db.flush()  # Asigna el id del trabajo sin commitear todavía.
+
+    db_presupuesto.convertido_a_trabajo = True
+    db_presupuesto.trabajo_id = nuevo_trabajo.id
+    db_presupuesto.estado = "Aprobado"
+
+    db.commit()
+    db.refresh(nuevo_trabajo)
+    return nuevo_trabajo
+
+
 @router.put("/{presupuesto_id}/convertir/{trabajo_id}", response_model=schemas.PresupuestoResponse)
 def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depends(get_db)):
     db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
     if not db_presupuesto:
         raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+
+    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
+    if not db_trabajo:
+        raise HTTPException(status_code=404, detail="El trabajo indicado no existe.")
+
+    if db_presupuesto.convertido_a_trabajo or db_presupuesto.trabajo_id:
+        raise HTTPException(status_code=409, detail="Este presupuesto ya fue convertido a trabajo.")
+
+    ya_tiene = db.query(models.Presupuesto).filter(
+        models.Presupuesto.trabajo_id == trabajo_id,
+        models.Presupuesto.id != presupuesto_id,
+    ).first()
+    if ya_tiene:
+        raise HTTPException(status_code=409, detail="Ese trabajo ya tiene un presupuesto asociado.")
 
     db_presupuesto.convertido_a_trabajo = True
     db_presupuesto.trabajo_id = trabajo_id

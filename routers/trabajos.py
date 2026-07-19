@@ -101,6 +101,15 @@ def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str,
 
 @router.post("/", response_model=schemas.TrabajoResponse)
 def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db)):
+    db_cliente = db.query(models.Cliente).filter(models.Cliente.id == trabajo.cliente_id).first()
+    if not db_cliente:
+        raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
+
+    if trabajo.papel_id:
+        articulo = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == trabajo.papel_id).first()
+        if not articulo:
+            raise HTTPException(status_code=404, detail="El papel indicado no existe en el stock.")
+
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
     db.commit()
