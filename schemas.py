@@ -48,6 +48,9 @@ class TrabajoBase(BaseModel):
     precio_venta: Decimal
     costo_total_materiales: Decimal = Decimal("0")
     forma_pago_heredada: Optional[str] = None
+    # La columna existía en el modelo pero no en el schema, así que lo que
+    # mandaba el drawer de alta lo descartaba Pydantic en silencio.
+    notas_iniciales: Optional[str] = None
 
     # Datos de la boleta física. Todos opcionales: un trabajo se puede dar de
     # alta sin la parte productiva y completarla después.
@@ -82,14 +85,16 @@ class TrabajoUpdate(BaseModel):
     papel_tipo: Optional[str] = None
     papel_id: Optional[str] = None
     cantidad_pliegos: Optional[Decimal] = None
+    notas_iniciales: Optional[str] = None
 
 class TrabajoResponse(TrabajoBase):
     id: str
-    # Campos de solo lectura: los controla el backend al imprimir la orden,
-    # por eso no están en TrabajoBase (nadie los manda desde afuera).
+    # Campos de solo lectura: los controla el backend al imprimir la orden o al
+    # cancelarla, por eso no están en TrabajoBase (nadie los manda desde afuera).
     orden_impresa: bool = False
     numero_orden: Optional[str] = None
     fecha_orden_impresa: Optional[datetime] = None
+    papel_devuelto: bool = False
     model_config = {"from_attributes": True}
 
 # Datos que se piden al pasar un trabajo de Aprobado a En Diseño.

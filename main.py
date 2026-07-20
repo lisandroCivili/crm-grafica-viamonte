@@ -2,11 +2,10 @@ import models
 import os
 import sys
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from database import engine, BASE_DIR
 # Importamos todos los routers modulares que creamos
@@ -71,27 +70,6 @@ def descargar_respaldo():
         filename=nombre_archivo, 
         media_type='application/octet-stream'
     )
-
-# Modelo de validación para el Login sencillo
-class LoginRequest(BaseModel):
-    usuario: str
-    contrasenia: str
-
-
-# Endpoint de autenticación fija (hardcodeada) para seguridad del sistema
-@app.post("/api/login")
-def login(datos: LoginRequest):
-    USUARIO_CORRECTO = "admin"
-    CLAVE_CORRECTA = "viamonte2026"
-
-    if datos.usuario == USUARIO_CORRECTO and datos.contrasenia == CLAVE_CORRECTA:
-        return {"status": "success", "message": "Acceso concedido"}
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Usuario o contraseña incorrectos",
-    )
-
 
 @app.get("/api/estado")
 def estado_servidor():

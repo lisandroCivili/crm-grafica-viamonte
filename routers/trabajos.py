@@ -59,6 +59,53 @@ def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str):
         )
 
 
+def _buscar_papel(db: Session, papel_id: str) -> models.ArticuloStock:
+    """Trae el artículo de stock y verifica que sea papel medido en pliegos.
+
+    El selector de papel históricamente listaba TODO el stock, así que nada
+    impedía vincular una orden a un bidón de tinta y restarle "3 pliegos".
+    Las compras por Kg ya se normalizan a "Pliegos" en stock.py, así que la
+    validación no deja afuera al papel comprado por peso.
+    """
+    articulo = (
+        db.query(models.ArticuloStock)
+        .filter(models.ArticuloStock.id == papel_id)
+        .first()
+    )
+    if not articulo:
+        raise HTTPException(status_code=404, detail="El papel indicado no existe en el stock.")
+
+    if articulo.unidad != "Pliegos":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{articulo.nombre}' se mide en {articulo.unidad}, no en pliegos. "
+                "Elegí un papel del stock."
+            ),
+        )
+    return articulo
+
+
+def _validar_pliegos(cantidad_pliegos) -> None:
+    """Los pliegos son unidades físicas: no existe medio pliego.
+
+    Sólo se aplica sobre lo que entra por la API. _descontar_papel no lo usa
+    porque hay trabajos históricos con cantidades fraccionarias y el descuento
+    no debe romperse por eso.
+    """
+    if cantidad_pliegos is None:
+        return
+
+    pliegos = Q3(cantidad_pliegos)
+    if pliegos <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="La cantidad de pliegos debe ser mayor a cero.")
+    if pliegos != pliegos.to_integral_value():
+        raise HTTPException(
+            status_code=400,
+            detail=f"La cantidad de pliegos debe ser un número entero (recibido: {pliegos}).",
+        )
+
+
 def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str, forzar: bool):
     """Descuenta del stock el papel que consume la orden y lo deja en el historial.
 
@@ -68,13 +115,7 @@ def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str,
     if not db_trabajo.papel_id or not db_trabajo.cantidad_pliegos:
         return  # Papel del cliente o comprado en el momento: no hay qué descontar.
 
-    articulo = (
-        db.query(models.ArticuloStock)
-        .filter(models.ArticuloStock.id == db_trabajo.papel_id)
-        .first()
-    )
-    if not articulo:
-        raise HTTPException(status_code=404, detail="El papel indicado no existe en el stock.")
+    articulo = _buscar_papel(db, db_trabajo.papel_id)
 
     pliegos = Q3(db_trabajo.cantidad_pliegos)
     if pliegos <= Decimal("0"):
@@ -99,6 +140,39 @@ def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str,
     articulo.cantidad = Q3(articulo.cantidad - pliegos)
     articulo.ultima_actualizacion = date.today()
 
+
+def _devolver_papel(db: Session, db_trabajo: models.Trabajo):
+    """Reingresa al stock los pliegos que consumió una orden que se cancela.
+
+    Espejo de _descontar_papel. Tampoco hace commit: lo hace el endpoint, para
+    que el cambio de estado y el reingreso entren o fallen juntos.
+
+    Idempotente vía papel_devuelto: cancelar, reactivar y volver a cancelar no
+    duplica el reingreso. Nota: un trabajo reactivado tampoco vuelve a
+    descontar, porque orden_impresa sigue en True y el guard de imprimir_orden
+    no redescuenta. Rehacer el ciclo completo imprimir/cancelar/reimprimir
+    exige repensar ambos guards juntos.
+    """
+    if db_trabajo.papel_devuelto:
+        return  # Ya se devolvió en una cancelación anterior.
+    if not db_trabajo.orden_impresa:
+        return  # Nunca se descontó: no hay nada que reingresar.
+    if not db_trabajo.papel_id or not db_trabajo.cantidad_pliegos:
+        return
+
+    articulo = _buscar_papel(db, db_trabajo.papel_id)
+
+    pliegos = Q3(db_trabajo.cantidad_pliegos)
+    if pliegos <= Decimal("0"):
+        return
+
+    motivo = f"Devolución por cancelación {db_trabajo.numero_orden or 'orden sin número'}"
+    db.add(models.HistorialStock(articulo_id=articulo.id, diferencia=pliegos, motivo=motivo))
+    articulo.cantidad = Q3(articulo.cantidad + pliegos)
+    articulo.ultima_actualizacion = date.today()
+    db_trabajo.papel_devuelto = True
+
+
 @router.post("/", response_model=schemas.TrabajoResponse)
 def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db)):
     db_cliente = db.query(models.Cliente).filter(models.Cliente.id == trabajo.cliente_id).first()
@@ -106,9 +180,8 @@ def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
 
     if trabajo.papel_id:
-        articulo = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == trabajo.papel_id).first()
-        if not articulo:
-            raise HTTPException(status_code=404, detail="El papel indicado no existe en el stock.")
+        _buscar_papel(db, trabajo.papel_id)
+        _validar_pliegos(trabajo.cantidad_pliegos)
 
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
@@ -138,7 +211,19 @@ def listar_trabajos(estado: str = None, sin_presupuesto: bool = False, db: Sessi
     return trabajos
 
 @router.put("/{trabajo_id}", response_model=schemas.TrabajoResponse)
-def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, db: Session = Depends(get_db)):
+def actualizar_trabajo(
+    trabajo_id: str,
+    trabajo_update: schemas.TrabajoUpdate,
+    devolver_papel: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Actualiza un trabajo.
+
+    devolver_papel sólo tiene efecto al pasar a 'Cancelado': reingresa al stock
+    los pliegos que había descontado la orden impresa. Va por query param (y no
+    en el schema) por el mismo criterio que 'forzar' en imprimir-orden: es una
+    decisión del operador en el momento, no un dato del trabajo.
+    """
     db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
     if not db_trabajo:
         raise HTTPException(status_code=404, detail="Trabajo no encontrado")
@@ -158,6 +243,15 @@ def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, d
                     detail="No se puede cambiar el papel ni los pliegos: la orden ya fue impresa y descontó stock.",
                 )
 
+    # El PUT no validaba nada del papel: se podía dejar un trabajo apuntando a un
+    # artículo inexistente o con la unidad equivocada. Validamos contra el valor
+    # efectivo (lo que viene en el update, o lo que ya tenía el trabajo).
+    if "papel_id" in update_data or "cantidad_pliegos" in update_data:
+        papel_id = update_data.get("papel_id", db_trabajo.papel_id)
+        if papel_id:
+            _buscar_papel(db, papel_id)
+            _validar_pliegos(update_data.get("cantidad_pliegos", db_trabajo.cantidad_pliegos))
+
     for key, value in update_data.items():
         setattr(db_trabajo, key, value)
 
@@ -165,7 +259,12 @@ def actualizar_trabajo(trabajo_id: str, trabajo_update: schemas.TrabajoUpdate, d
     if trabajo_update.estado in ["En Diseño", "En Producción"] and not db_trabajo.fecha_comienzo:
         db_trabajo.fecha_comienzo = date.today()
         
-    # <-- AGREGAR ESTO: Sincronizar el estado con su Presupuesto madre
+    # El papel de una orden cancelada vuelve al stock si el operador lo pide.
+    # Dentro de la misma transacción que el cambio de estado.
+    if trabajo_update.estado == "Cancelado" and devolver_papel:
+        _devolver_papel(db, db_trabajo)
+
+    # Sincronizar el estado con su Presupuesto madre
     if trabajo_update.estado:
         db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
         if db_presupuesto:

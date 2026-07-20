@@ -9,6 +9,20 @@ from money import Money, Cantidad
 # valida contra esta lista y el frontend arma el Kanban con estos mismos nombres.
 ESTADOS_TRABAJO = ["Aprobado", "En Diseño", "En Producción", "Entregado", "Cancelado"]
 
+
+def ahora_local():
+    """Hora local del taller para los registros que se agrupan por día.
+
+    El dashboard agrupa por fecha local: un pago cargado a las 22:00 fechado en
+    UTC caía al día siguiente y, cerca de fin de mes, en el período equivocado.
+    Consistente con gastos y cheques, que ya usan date.today().
+
+    Ojo: HistorialStock e HistorialCheque siguen guardando UTC con timezone
+    (son cronológicos, no contables). Mezclar unos con otros en Python lanza
+    TypeError: unificarlos es una migración aparte.
+    """
+    return datetime.now()
+
 class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
@@ -62,6 +76,11 @@ class Trabajo(Base):
     numero_orden = Column(String, index=True, nullable=True) # se asigna recién al imprimir
     fecha_orden_impresa = Column(DateTime, nullable=True)
 
+    # Espejo de orden_impresa para el camino inverso: al cancelar un trabajo se
+    # ofrece devolver los pliegos al stock, y este flag garantiza que el
+    # reingreso pase una sola vez aunque se cancele y reactive varias veces.
+    papel_devuelto = Column(Boolean, default=False)
+
     cliente = relationship("Cliente", back_populates="trabajos")
     notas = relationship("Nota", back_populates="trabajo")
     papel = relationship("ArticuloStock")
@@ -71,7 +90,7 @@ class Movimiento(Base):
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
     trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
-    fecha = Column(DateTime, default=datetime.utcnow)
+    fecha = Column(DateTime, default=ahora_local)
     monto = Column(Money, nullable=False)
     tipo = Column(String, nullable=False) # 'Pago', 'Edición', 'Ajuste'
     metodo = Column(String, nullable=True) # Ej: 'Efectivo', 'Transferencia'
@@ -82,10 +101,10 @@ class Movimiento(Base):
 class Nota(Base):
     __tablename__ = "notas"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False) # <--- AGREGAR ESTO
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False)
     trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
     texto = Column(Text, nullable=False)
-    fecha_creacion = Column(DateTime, default=datetime.utcnow)
+    fecha_creacion = Column(DateTime, default=ahora_local)
 
     trabajo = relationship("Trabajo", back_populates="notas")
 

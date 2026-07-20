@@ -70,13 +70,13 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
         motivo = f"Compra: +{cantidad} {unidad}"
 
     costo_unitario = item.costo_unitario
-    if item.costo_total is not None:
+    # Guardia de división: _calcular_pliegos devuelve 0 si el peso comprado no
+    # llega ni a medio pliego. Sin esto revienta con DivisionByZero.
+    if item.costo_total is not None and cantidad > 0:
         costo_unitario = Q2(item.costo_total / cantidad)
 
-    if articulo:
-        articulo.cantidad = Q3(articulo.cantidad + cantidad)
-        db.add(models.HistorialStock(articulo_id=articulo.id, diferencia=cantidad, motivo=motivo))
-    else:
+    es_alta = articulo is None
+    if es_alta:
         articulo = models.ArticuloStock(
             nombre=item.nombre,
             categoria=item.categoria or "General",
@@ -86,6 +86,11 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
             stock_minimo=item.stock_minimo if item.stock_minimo is not None else Decimal("5"),
         )
         db.add(articulo)
+    else:
+        articulo.cantidad = Q3(articulo.cantidad + cantidad)
+        # Una recompra por Kg de un artículo dado de alta en "Kg" lo deja
+        # etiquetado en pliegos, que es como quedó realmente la cantidad.
+        articulo.unidad = unidad
 
     if costo_unitario is not None:
         articulo.costo_unitario = costo_unitario
@@ -96,6 +101,18 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
     if gramaje is not None:
         articulo.gramaje_grs = gramaje
     articulo.ultima_actualizacion = date.today()
+
+    # El asiento va al final, con el artículo ya completo: en un alta hay que
+    # hacer flush() para que SQLAlchemy resuelva el default del id (se genera al
+    # insertar, no al construir) y el FK del historial no quede en NULL, y para
+    # eso las columnas NOT NULL ya tienen que estar cargadas.
+    if es_alta:
+        db.flush()
+    db.add(models.HistorialStock(
+        articulo_id=articulo.id,
+        diferencia=cantidad,
+        motivo=f"Alta inicial. {motivo}" if es_alta else motivo,
+    ))
     return articulo
 
 @router.get("/", response_model=list[schemas.StockResponse])
@@ -106,6 +123,13 @@ def listar_stock(db: Session = Depends(get_db)):
 def crear_articulo(art: schemas.StockCreate, db: Session = Depends(get_db)):
     nuevo = models.ArticuloStock(**art.model_dump())
     db.add(nuevo)
+    # Igual que en las compras: la cantidad nunca entra sin dejar asiento.
+    db.flush()
+    db.add(models.HistorialStock(
+        articulo_id=nuevo.id,
+        diferencia=Q3(nuevo.cantidad),
+        motivo=f"Alta inicial: +{Q3(nuevo.cantidad)} {nuevo.unidad}",
+    ))
     db.commit()
     db.refresh(nuevo)
     return nuevo
@@ -133,7 +157,6 @@ def registrar_compra(items: list[schemas.CompraStockItem], db: Session = Depends
         db.refresh(art)
     return articulos
 
-# REEMPLAZAR EL PATCH Y AGREGAR EL GET DE HISTORIAL
 @router.patch("/{articulo_id}")
 def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: Session = Depends(get_db)):
     db_art = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == articulo_id).first()

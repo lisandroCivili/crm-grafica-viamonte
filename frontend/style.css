@@ -89,45 +89,6 @@ tr:hover td { background: var(--magenta-soft); }
 .form-group label { font-size: 13px; color: var(--ink); }
 .resumen-caja { background: var(--magenta-soft); padding: 16px; border-radius: 8px; margin-top: 20px; }
 
-/* =========================================
-   PANTALLA DE LOGIN
-========================================= */
-#login-screen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: var(--ink);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 9999;
-}
-
-.login-box {
-  background: var(--panel);
-  padding: 40px;
-  border-radius: var(--radius);
-  width: 100%;
-  max-width: 400px;
-  text-align: center;
-}
-
-.login-box h2 {
-  color: var(--magenta);
-  margin-bottom: 20px;
-}
-
-.login-box input {
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 14px;
-}
-
 .hidden {
   display: none !important;
 }

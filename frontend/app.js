@@ -2,6 +2,10 @@
 // esta carpeta), así que siempre está en el mismo origen que la API.
 const API_URL = '/api';
 let clienteActualFicha = null; // Guardamos qué cliente está abierto
+// Trabajos de la última carga del Kanban, indexados por id. Los onclick de las
+// tarjetas pasan el id y leen de acá: interpolar textos en el atributo se rompe
+// con un apóstrofo en la descripción.
+const trabajosPorId = new Map();
 
 // ==========================================
 // HELPER: FORMATO DE DINERO (siempre 2 decimales)
@@ -10,6 +14,33 @@ let clienteActualFicha = null; // Guardamos qué cliente está abierto
 function fmtMoney(valor) {
     const n = Number(valor) || 0;
     return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ==========================================
+// HELPER: ESCAPE DE TEXTO PARA innerHTML
+// ==========================================
+// Todo el render arma HTML por interpolación. Un cliente "O'Brien" o una
+// descripción con < rompían el markup (y los onclick inline). Pasar SIEMPRE
+// por acá cualquier texto que venga de la base.
+const ESCAPES_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, c => ESCAPES_HTML[c]);
+}
+
+// ==========================================
+// HELPER: MENSAJE DE ERROR DE LA API
+// ==========================================
+// El `detail` de FastAPI es un string en los HTTPException nuestros, pero un
+// array de objetos en los 422 de validación de Pydantic. Devolvemos algo
+// legible en los dos casos.
+function detalleError(error, porDefecto = 'Revisá los datos e intentá de nuevo.') {
+    const detail = error?.detail;
+    if (!detail) return porDefecto;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(d => `${(d.loc || []).slice(1).join('.')}: ${d.msg}`).join('\n') || porDefecto;
+    }
+    return porDefecto;
 }
 
 // ==========================================
@@ -227,7 +258,7 @@ async function abrirFicha(id) {
             divTrabajos.innerHTML += `
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
-                        <span>#${shortId} - ${t.cantidad}x ${t.descripcion_producto}</span>
+                        <span>#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)}</span>
                         <span style="color:var(--magenta)">$${fmtMoney(t.precio_venta)} ▾</span>
                     </div>
                     <div class="accordion-body">
@@ -237,8 +268,8 @@ async function abrirFicha(id) {
                         </p>
                         <p style="margin:0 0 8px 0;"><b>Fecha de ingreso:</b> ${t.fecha_creacion}</p>
                         <p style="margin:0 0 8px 0;"><b>Fecha de comienzo:</b> ${t.fecha_comienzo || '-'}</p>
-                        <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${t.notas_iniciales || 'Ninguna'}</p>
-                        <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}', '${t.descripcion_producto}', ${t.cantidad}, ${t.precio_venta})">✏️ Editar Trabajo</button>
+                        <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${esc(t.notas_iniciales) || 'Ninguna'}</p>
+                        <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}')">✏️ Editar Trabajo</button>
                         <button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--red); color:var(--red);" onclick="eliminarTrabajo('${t.id}', this)">🗑️ Borrar</button>
                     </div>
                 </div>
@@ -253,7 +284,7 @@ async function abrirFicha(id) {
             tbodyMovimientos.innerHTML += `
                 <tr>
                     <td>${new Date(m.fecha).toLocaleDateString('es-AR')}</td>
-                    <td>${m.descripcion} <br><small style="color:var(--muted);">${m.metodo || m.tipo}</small></td>
+                    <td>${esc(m.descripcion)} <br><small style="color:var(--muted);">${esc(m.metodo || m.tipo)}</small></td>
                     <td class="tnum" style="color:${colorMonto}; font-weight:600;">${signo}$${fmtMoney(m.monto)}</td>
                     <td style="text-align:center;">
                         <button class="btn secondary" style="font-size:11px; padding:4px 6px;" onclick="editarMovimiento('${m.id}')">✏️</button>
@@ -304,7 +335,7 @@ async function abrirDrawerPago() {
 
         trabajosCliente.forEach(t => {
             const shortId = t.id.substring(0,6).toUpperCase();
-            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto} (Total: $${fmtMoney(t.precio_venta)})</option>`;
+            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)} (Total: $${fmtMoney(t.precio_venta)})</option>`;
         });
     } catch(e) { console.error(e); }
 
@@ -414,7 +445,7 @@ async function editarMovimiento(id) {
             title: 'Editar movimiento',
             html:
                 `<input id="swal-monto" type="number" step="0.01" class="swal2-input" placeholder="Monto" value="${mov.monto}">` +
-                `<input id="swal-desc" type="text" class="swal2-input" placeholder="Descripción" value="${mov.descripcion}">`,
+                `<input id="swal-desc" type="text" class="swal2-input" placeholder="Descripción" value="${esc(mov.descripcion)}">`,
             focusConfirm: false,
             showCancelButton: true,
             confirmButtonText: 'Guardar',
@@ -540,19 +571,21 @@ async function eliminarNota(id) {
 // ==========================================
 // 5. EDICIÓN DE TRABAJOS (Historial automático)
 // ==========================================
-async function abrirModalEditarTrabajo(id, descripcion, cantidad, precio) {
+// Recibe SOLO el id: antes se le pasaban la descripción y los importes
+// serializados en el atributo onclick, y cualquier apóstrofo en la descripción
+// rompía el HTML. Todos los datos salen del backend, que ya es la fuente de verdad.
+async function abrirModalEditarTrabajo(id) {
     document.getElementById('fe_trabajo_id').value = id;
-    document.getElementById('fe_descripcion').value = descripcion;
-    document.getElementById('fe_cantidad').value = cantidad;
-    document.getElementById('fe_precio').value = precio;
     document.getElementById('fe_razon').value = '';
 
-    // El resto de la boleta no viene por parámetro: la traemos del backend.
     await cargarSelectoresPapel();
     const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
     const t = trabajos.find(x => x.id === id) || {};
 
     const set = (campo, valor) => { document.getElementById(campo).value = valor ?? ''; };
+    set('fe_descripcion', t.descripcion_producto);
+    set('fe_cantidad', t.cantidad);
+    set('fe_precio', t.precio_venta);
     set('fe_papel_id', t.papel_id);
     set('fe_cantidad_pliegos', t.cantidad_pliegos);
     set('fe_papel_tipo', t.papel_tipo);
@@ -706,7 +739,7 @@ async function cargarClientes(filtro = "") {
 
             tbody.innerHTML += `
                 <tr class="client-row">
-                  <td><b>${cliente.nombre_completo}</b></td>
+                  <td><b>${esc(cliente.nombre_completo)}</b></td>
                   <td>${cliente.nombre_empresa || '-'}</td>
                   <td class="tnum">${cliente.dni_cuit}</td>
                   <td class="tnum" style="color: ${colorSaldo}; font-weight: 600;">$ ${fmtMoney(saldoReal)}</td>
@@ -738,10 +771,20 @@ async function guardarCliente(e) {
         frecuencia_recompra_dias: document.getElementById('fc_recompra').value ? parseInt(document.getElementById('fc_recompra').value) : null
     };
     try {
-        await fetch(`${API_URL}/clientes/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const resp = await fetch(`${API_URL}/clientes/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        if (!resp.ok) {
+            // Antes se reseteaba el form y se cerraba el drawer aunque el backend
+            // hubiera rechazado los datos: el cliente nunca se guardaba y nadie avisaba.
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo guardar', detalleError(error), 'error');
+            return;
+        }
         document.getElementById('form-cliente').reset();
         toggleDrawer('drawer-nuevo-cliente');
         cargarClientes();
+    } catch (error) {
+        console.error("Error al guardar cliente:", error);
+        Swal.fire('Error de conexión', 'No se pudo guardar el cliente.', 'error');
     } finally {
         restore();
     }
@@ -870,6 +913,13 @@ async function guardarTrabajo(e) {
         };
 
         const resp = await fetch(`${API_URL}/trabajos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        if (!resp.ok) {
+            // Sin este chequeo, el body de error no trae `id` y la línea de abajo
+            // reventaba con TypeError, dejando el drawer abierto y sin mensaje.
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo guardar el trabajo', detalleError(error), 'error');
+            return;
+        }
         const nuevoTrabajo = await resp.json();
         const shortId = nuevoTrabajo.id.substring(0,6).toUpperCase();
 
@@ -894,6 +944,9 @@ async function guardarTrabajo(e) {
         if (clienteActualFicha === cliente_id && document.getElementById('drawer-cliente').classList.contains('open')) {
             abrirFicha(clienteActualFicha);
         }
+    } catch (error) {
+        console.error("Error al guardar trabajo:", error);
+        Swal.fire('Error de conexión', 'No se pudo guardar el trabajo.', 'error');
     } finally {
         restore();
     }
@@ -905,16 +958,19 @@ async function cargarSelectorClientes() {
     const selector = document.getElementById('ft_cliente_id');
     if(!selector) return;
     selector.innerHTML = '<option value="">Seleccione un cliente...</option>';
-    clientes.forEach(c => selector.innerHTML += `<option value="${c.id}">${c.nombre_completo}</option>`);
+    clientes.forEach(c => selector.innerHTML += `<option value="${c.id}">${esc(c.nombre_completo)}</option>`);
     cargarSelectoresPapel();
 }
 
 // Puebla los selects de papel (alta y edición de trabajo) con los artículos de
 // stock. El papel es opcional: la primera opción es vacía.
+// Sólo listamos artículos en Pliegos: el backend rechaza cualquier otra unidad
+// (no tiene sentido descontarle "3 pliegos" a un bidón de tinta en litros).
 async function cargarSelectoresPapel() {
     const stock = await (await fetch(`${API_URL}/stock/`)).json();
+    const papeles = stock.filter(a => a.unidad === 'Pliegos');
     const opciones = '<option value="">Sin papel del stock</option>' +
-        stock.map(a => `<option value="${a.id}">${a.nombre} (${a.cantidad} ${a.unidad})</option>`).join('');
+        papeles.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
     ['ft_papel_id', 'fe_papel_id'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) {
@@ -1130,7 +1186,6 @@ async function descargarOrden(id, forzar = false) {
         return false;
     }
 }
-// REEMPLAZAR cargarTrabajos
 async function cargarTrabajos() {
     const [trabajos, clientes, presupuestos] = await Promise.all([
         (await fetch(`${API_URL}/trabajos/`)).json(),
@@ -1152,41 +1207,154 @@ async function cargarTrabajos() {
     };
     Object.values(cols).forEach(col => { if(col) col.innerHTML = col.firstElementChild.outerHTML; });
 
+    // Los cancelados están ocultos por defecto: el tablero es de trabajo activo.
+    // El checkbox los trae de vuelta para poder reactivarlos (antes, un trabajo
+    // cancelado desaparecía del frontend sin ninguna forma de recuperarlo).
+    const verCancelados = document.getElementById('chk-ver-cancelados')?.checked;
+
+    // Los guardamos por id para que los onclick pasen sólo el id: serializar
+    // textos en el atributo se rompe con cualquier apóstrofo en la descripción.
+    trabajosPorId.clear();
+    trabajos.forEach(t => trabajosPorId.set(t.id, t));
+
     trabajos.forEach(t => {
-        // FILTRO BARRERA: Si está cancelado, ni lo miramos para el Kanban
-        if (t.estado === "Cancelado") return;
+        const cancelado = t.estado === "Cancelado";
+        if (cancelado && !verCancelados) return;
 
         const cliente = clientes.find(c => c.id === t.cliente_id);
         const bordeColor = t.estado === "En Diseño" ? "var(--magenta)" : (t.estado === "En Producción" ? "var(--amber)" : "transparent");
         const shortId = t.id.substring(0,6).toUpperCase();
-        
+
         const nroOrden = t.numero_orden
-            ? `<span style="font-size:10px; color:var(--green); font-weight:600;">🖨️ ${t.numero_orden}</span>`
+            ? `<span style="font-size:10px; color:var(--green); font-weight:600;">🖨️ ${esc(t.numero_orden)}</span>`
             : '';
         // Distintivo: el trabajo no tiene presupuesto asociado (no suma ganancia).
         const sinPresupuesto = !trabajosConPresupuesto.has(t.id);
         const badgeSinPresu = sinPresupuesto
             ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#fff3cd; color:#8a6d00; border:1px solid var(--amber); padding:2px 6px; border-radius:4px;">⚠️ Sin presupuesto</span></div>`
             : '';
+        const badgeCancelado = cancelado
+            ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#f8d7da; color:#842029; border:1px solid var(--red, #C13B3B); padding:2px 6px; border-radius:4px;">✖ Cancelado</span></div>`
+            : '';
+        // Un trabajo cancelado no se arrastra ni se reimprime: sólo se reactiva.
+        const acciones = cancelado
+            ? `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>`
+            : `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarOrden('${t.id}')">
+                ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
+              </button>
+              <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>`;
+
         const tarjetaHTML = `
-            <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')" style="border-left: 4px solid ${bordeColor}; cursor: grab;">
+            <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" ${cancelado ? '' : `draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')"`} style="border-left: 4px solid ${bordeColor}; cursor: ${cancelado ? 'default' : 'grab'}; ${cancelado ? 'opacity:.6;' : ''}">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
                 <span style="font-size:10px; color:var(--muted);">#${shortId}</span>
                 ${nroOrden}
               </div>
+              ${badgeCancelado}
               ${badgeSinPresu}
-              <div class="client">${cliente ? cliente.nombre_completo : 'Desconocido'}</div>
-              <div class="job">${t.cantidad}x ${t.descripcion_producto}</div>
+              <div class="client">${cliente ? esc(cliente.nombre_completo) : 'Desconocido'}</div>
+              <div class="job">${t.cantidad}x ${esc(t.descripcion_producto)}</div>
               <div class="date">${t.fecha_creacion} - $${fmtMoney(t.precio_venta)}</div>
-              <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarOrden('${t.id}')">
-                ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
-              </button>
+              ${acciones}
             </div>
         `;
-        
-        if (cols[t.estado]) cols[t.estado].innerHTML += tarjetaHTML;
-        else if (cols["Aprobado"]) cols["Aprobado"].innerHTML += tarjetaHTML;
+
+        // Los cancelados no tienen columna propia: se muestran en la primera.
+        const columna = cancelado ? cols["Aprobado"] : (cols[t.estado] || cols["Aprobado"]);
+        if (columna) columna.innerHTML += tarjetaHTML;
     });
+}
+
+// Cancelar un trabajo. Si la orden ya se imprimió, descontó pliegos del stock:
+// preguntamos si devolverlos. El backend es idempotente (flag papel_devuelto),
+// así que cancelar dos veces nunca duplica el reingreso.
+async function cancelarTrabajo(id) {
+    const t = trabajosPorId.get(id);
+    if (!t) return;
+
+    const confirmacion = await Swal.fire({
+        title: '¿Cancelar el trabajo?',
+        text: 'Deja de contar para facturación y sale del tablero. Podés reactivarlo después.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, cancelar',
+        cancelButtonText: 'No'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    let devolverPapel = false;
+    const tienePapelDescontado = t.orden_impresa && t.papel_id && Number(t.cantidad_pliegos) > 0 && !t.papel_devuelto;
+    if (tienePapelDescontado) {
+        const decision = await Swal.fire({
+            title: '¿Devolver el papel al stock?',
+            text: `La orden descontó ${t.cantidad_pliegos} pliegos. Si el papel no se usó, podés reingresarlos.`,
+            icon: 'question',
+            showDenyButton: true,
+            showCancelButton: true,
+            confirmButtonText: 'Sí, devolver',
+            denyButtonText: 'No, ya se usó',
+            cancelButtonText: 'Volver'
+        });
+        if (decision.isDismissed) return; // "Volver": no cancelamos nada.
+        devolverPapel = decision.isConfirmed;
+    }
+
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}?devolver_papel=${devolverPapel}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: "Cancelado" })
+        });
+        if (!resp.ok) {
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo cancelar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
+            return;
+        }
+        cargarTrabajos();
+        if (devolverPapel) cargarStock();
+        Swal.fire({
+            title: 'Trabajo cancelado',
+            text: devolverPapel ? `Se devolvieron ${t.cantidad_pliegos} pliegos al stock.` : '',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false
+        });
+    } catch (error) {
+        console.error('Error al cancelar el trabajo:', error);
+        Swal.fire('Error de conexión', 'No se pudo cancelar el trabajo.', 'error');
+    }
+}
+
+// Vuelve un trabajo cancelado a Aprobado. El papel devuelto NO se vuelve a
+// descontar: orden_impresa sigue en true y el guard de imprimir-orden no
+// redescuenta, así que hay que ajustar el stock a mano si se reimprime.
+async function reactivarTrabajo(id) {
+    const confirmacion = await Swal.fire({
+        title: '¿Reactivar el trabajo?',
+        text: 'Vuelve al tablero en estado Aprobado.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, reactivar',
+        cancelButtonText: 'No'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: "Aprobado" })
+        });
+        if (!resp.ok) {
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo reactivar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
+            return;
+        }
+        cargarTrabajos();
+    } catch (error) {
+        console.error('Error al reactivar el trabajo:', error);
+        Swal.fire('Error de conexión', 'No se pudo reactivar el trabajo.', 'error');
+    }
 }
 
 // PDFs y Extras
@@ -1211,21 +1379,6 @@ async function generarInformeDiarioPDF() {
     }
 }
 
-function cargarDashboard() {
-    const ctx = document.getElementById('chartComparativo');
-    if (!ctx) return;
-    new Chart(ctx.getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels: ['Marzo', 'Abril', 'Mayo', 'Junio'],
-        datasets: [
-          { label: 'Ingresos', data: [420000, 510000, 480000, 630000], backgroundColor: '#22824F' },
-          { label: 'Gastos', data: [280000, 310000, 290000, 350000], backgroundColor: '#C13B3B' }
-        ]
-      }
-    });
-}
-
 // ==========================================
 // MÓDULO DE PRESUPUESTOS AVANZADO
 // ==========================================
@@ -1235,14 +1388,16 @@ const LISTA_COSTOS = ["Papel", "Troquel", "Luz", "Diseño", "Chapas", "Impresió
 let idPresupuestoVersionDe = null; // Para saber si estamos duplicando uno viejo
 let idPresupuestoEditando = null; // Para saber si estamos editando un presupuesto existente (en vez de crear uno nuevo)
 
-// Reemplazá abrirDrawerPresupuesto
 async function abrirDrawerPresupuesto() {
     idPresupuestoVersionDe = null; // Reseteamos por si era nuevo
     idPresupuestoEditando = null;
     document.getElementById('modal-presupuesto').classList.remove('hidden');
     // Por defecto visible (editar lo oculta); acá lo restauramos.
     document.getElementById('mp-asociar-trabajo-row').style.display = '';
-    document.getElementById('lbl-pres-id').innerHTML = `Nº 0001-${Math.floor(1000 + Math.random() * 9000)}`;
+    // El número real (numero_secuencia) lo asigna el backend al guardar. Antes
+    // acá se inventaba uno al azar que no coincidía con nada y cambiaba cada
+    // vez que se abría el modal.
+    document.getElementById('lbl-pres-id').innerHTML = `<span style="color:var(--muted); font-size:13px;">Nº (se asigna al guardar)</span>`;
     
     const cont = document.getElementById('contenedor-costos');
     cont.innerHTML = '';
@@ -1255,7 +1410,7 @@ async function abrirDrawerPresupuesto() {
         const clientes = await resp.json();
         const select = document.getElementById('mp_cliente_id');
         select.innerHTML = '<option value="">Sin cliente (borrador)</option>';
-        clientes.forEach(c => select.innerHTML += `<option value="${c.id}">${c.nombre_completo}</option>`);
+        clientes.forEach(c => select.innerHTML += `<option value="${c.id}">${esc(c.nombre_completo)}</option>`);
     } catch (e) { console.error(e); }
 
     // Trabajos que todavía no tienen presupuesto: se pueden asociar a este.
@@ -1268,7 +1423,7 @@ async function abrirDrawerPresupuesto() {
             .filter(t => t.estado !== 'Cancelado')
             .forEach(t => {
                 const shortId = t.id.substring(0, 6).toUpperCase();
-                selT.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto}</option>`;
+                selT.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)}</option>`;
             });
     } catch (e) { console.error(e); }
 
@@ -1310,7 +1465,7 @@ async function duplicarPresupuesto(id) {
         await abrirDrawerPresupuesto(); // Prepara el modal limpio
         
         idPresupuestoVersionDe = id; // Clavamos la relación
-        document.getElementById('lbl-pres-id').innerHTML = `Nº 0001-... <span style="color:var(--magenta); font-size:12px;">(Versión de #${id.substring(0,6).toUpperCase()})</span>`;
+        document.getElementById('lbl-pres-id').innerHTML = `<span style="color:var(--muted); font-size:13px;">Nº (se asigna al guardar)</span> <span style="color:var(--magenta); font-size:12px;">(Versión de #${id.substring(0,6).toUpperCase()})</span>`;
         
         // Rellenamos
         document.getElementById('mp_cliente_id').value = p.cliente_id || '';
@@ -1365,7 +1520,6 @@ async function editarPresupuesto(id) {
     } catch (e) { console.error(e); }
 }
 
-// REEMPLAZAR guardarPresupuestoModerno (Agrega la version + soporta edición)
 async function guardarPresupuestoModerno(e) {
     e.preventDefault();
     const restore = disableButtonOnSubmit(e);
@@ -1474,7 +1628,6 @@ async function eliminarPresupuesto(id, button) {
     }
 }
 
-// REEMPLAZAR cargarPresupuestos
 async function cargarPresupuestos() {
     try {
         const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
@@ -1538,7 +1691,6 @@ async function cargarPresupuestos() {
     } catch (e) { console.error(e); }
 }
 
-// REEMPLAZAR convertirATrabajo en app.js
 async function convertirATrabajo(presupuesto_id, button) {
     if (!button) button = event?.target;
     const originalText = button?.innerText || 'A Trabajo';
@@ -1598,16 +1750,22 @@ async function convertirATrabajo(presupuesto_id, button) {
         }
 
         // La conversión ya está hecha: si falla la cancelación del trabajo
-        // anterior avisamos, pero no la reportamos como fallida.
+        // anterior avisamos, pero no la reportamos como fallida. Por eso el
+        // fetch va con su propio try: un error de red acá NO significa que la
+        // conversión haya fallado, y el catch de abajo diría lo contrario.
+        // La versión anterior se descarta, así que su papel vuelve al stock.
         let avisoCancelacion = '';
         if (cancelarAnterior) {
-            const respCancel = await fetch(`${API_URL}/trabajos/${madre.trabajo_id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ estado: "Cancelado" })
-            });
-            if (!respCancel.ok) {
-                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo a mano desde el Kanban.';
+            try {
+                const respCancel = await fetch(`${API_URL}/trabajos/${madre.trabajo_id}?devolver_papel=true`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ estado: "Cancelado" })
+                });
+                if (!respCancel.ok) throw new Error('respuesta no OK');
+            } catch (e) {
+                console.error('Error al cancelar el trabajo anterior:', e);
+                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo con el botón ✖ de su tarjeta en el Kanban.';
             }
             // (Se eliminó el Movimiento monto:0 de "cancelado por corrección": no es plata real.)
         }
@@ -1814,7 +1972,6 @@ async function generarInformeTrabajosPDF() {
 // MÓDULO DE GASTOS
 // ==========================================
 
-// REEMPLAZAR abrirDrawerGasto
 let idGastoEditando = null;
 // Última lista de trabajos traída para el select del drawer. La guardamos para
 // que editarGasto pueda recuperar un trabajo ya entregado sin pedirla de nuevo.
@@ -1849,7 +2006,7 @@ async function abrirDrawerGasto() {
             const activos = trabajos.filter(t => t.estado !== 'Entregado' && t.estado !== 'Cancelado').reverse();
             activos.forEach(t => {
                 const shortId = t.id.substring(0,6).toUpperCase();
-                selectT.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto}</option>`;
+                selectT.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)}</option>`;
             });
         }
     } catch(e) { console.error(e); }
@@ -1897,7 +2054,6 @@ async function editarGasto(id) {
     } catch (e) { console.error("Error al abrir edición de gasto:", e); }
 }
 
-// REEMPLAZAR cargarGastos
 async function cargarGastos() {
     try {
         const resp = await fetch(`${API_URL}/gastos/`);
@@ -2219,7 +2375,7 @@ async function cargarArticulosExistentes() {
         stockCacheCompras = await resp.json();
         const sel = document.getElementById('fs_articulo_existente');
         sel.innerHTML = '<option value="">— Artículo nuevo —</option>' +
-            stockCacheCompras.map(a => `<option value="${a.id}">${a.nombre} (${a.cantidad} ${a.unidad})</option>`).join('');
+            stockCacheCompras.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
     } catch (e) { console.error("Error cargando artículos existentes:", e); }
 }
 
@@ -2504,8 +2660,7 @@ async function cargarStock() {
             const enAlerta = Number(s.cantidad) <= Number(s.stock_minimo);
             if (enAlerta) alertasTotales++;
 
-            // REEMPLAZAR DECLARACIÓN DE badgeEstado EN cargarStock()
-            let badgeEstado = enAlerta 
+            let badgeEstado = enAlerta
                 ? `<span style="background:var(--red); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">¡COMPRAR!</span>`
                 : `<span style="background:var(--green); color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold;">Suficiente</span>`;
             
@@ -2547,7 +2702,6 @@ async function cargarStock() {
     } catch (e) { console.error("Error cargando stock:", e); }
 }
 
-// REEMPLAZAR ajustarStockRapido
 async function ajustarStockRapido(id, cantidadActual, accion, unidad, button) {
     if (!button) button = event?.target;
     const originalText = button?.innerText || (accion === 1 ? '+' : '-');
@@ -2674,14 +2828,6 @@ async function cargarDashboard() {
         let clientes = await respCl.json();
         let movimientos = respM.ok ? await respM.json() : [];
 
-        // Pagos acumulados por trabajo (solo movimientos de tipo 'Pago').
-        const pagosPorTrabajo = {};
-        movimientos.forEach(m => {
-            if (m.tipo === 'Pago' && m.trabajo_id) {
-                pagosPorTrabajo[m.trabajo_id] = (pagosPorTrabajo[m.trabajo_id] || 0) + Number(m.monto);
-            }
-        });
-
         // LOGICA DE CHEQUES
         let plataEnCheques = 0;
         let plataChequesAPagar = 0;
@@ -2704,7 +2850,7 @@ async function cargarDashboard() {
                     
                     htmlAlertasCheques += `
                         <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
-                            <span style="${esVencido}">📅 ${fechaCobroDate.toLocaleDateString('es-AR')} - ${nomCli}</span>
+                            <span style="${esVencido}">📅 ${fechaCobroDate.toLocaleDateString('es-AR')} - ${esc(nomCli)}</span>
                             <span style="font-weight:bold;">$ ${fmtMoney(ch.monto)}</span>
                         </div>
                     `;
@@ -2748,95 +2894,72 @@ async function cargarDashboard() {
         const trabajosFiltrados = trabajos.filter(t => cumpleFiltro(t.fecha_creacion));
         const gastosFiltrados = gastos.filter(g => cumpleFiltro(g.fecha));
 
-        let totalIngresos = 0;
-        let plataEnLaCalle = 0;
+        // Plata estancada: trabajos que todavía dan vueltas en el taller. Este sí
+        // se calcula acá porque no depende de cobranzas, sólo del estado.
         let plataEstancada = 0;
-        let htmlMorosos = '';
-        
         trabajosFiltrados.forEach(t => {
-            if (t.estado !== 'Cancelado') {
-                totalIngresos += Number(t.precio_venta);
-
-                // Si el trabajo está dando vueltas en el taller, es plata estancada
-                if (t.estado === 'Aprobado' || t.estado === 'En Diseño' || t.estado === 'En Producción') {
-                    plataEstancada += Number(t.precio_venta);
-                }
-
-                // Plata en la calle y Semáforo de Morosos: solo lo que REALMENTE falta cobrar.
-                if (t.estado === 'Entregado') {
-                    const pagado = pagosPorTrabajo[t.id] || 0;
-                    const saldoPendiente = Number(t.precio_venta) - pagado;
-
-                    // Un trabajo entregado y cobrado al 100% NO es moroso.
-                    if (saldoPendiente > 0) {
-                        plataEnLaCalle += saldoPendiente;
-
-                        const shortId = t.id.substring(0,6).toUpperCase();
-                        htmlMorosos += `
-                            <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
-                                <span><b>#${shortId}</b> - ${t.descripcion_producto}</span>
-                                <span style="color:var(--red); font-weight:bold;">$ ${fmtMoney(saldoPendiente)}</span>
-                            </div>
-                        `;
-                    }
-                }
+            if (t.estado === 'Aprobado' || t.estado === 'En Diseño' || t.estado === 'En Producción') {
+                plataEstancada += Number(t.precio_venta);
             }
         });
 
-        let totalEgresos = 0;
         let gastosPorCat = {};
         gastosFiltrados.forEach(g => {
-            totalEgresos += Number(g.monto);
             gastosPorCat[g.categoria] = (gastosPorCat[g.categoria] || 0) + Number(g.monto);
         });
 
-        // Morosos y "plata en la calle": fuente de verdad en el backend (incluye
-        // cheques recibidos no rechazados, igual que el saldo de la ficha). El
-        // cálculo local de arriba queda solo como fallback.
-        if (kpis) {
-            plataEnLaCalle = Number(kpis.plata_en_la_calle);
-            htmlMorosos = kpis.morosos.map(m => `
+        // Los KPIs financieros salen SOLO del backend: ingresos = plata realmente
+        // cobrada, ganancia = margen proporcional a lo cobrado − gastos, y morosos
+        // que contemplan cheques recibidos. El cálculo local que había acá los
+        // ignoraba y mostraba deuda inflada, así que ante un fallo preferimos
+        // avisar antes que dibujar números equivocados.
+        const avisoError = document.getElementById('dash-error');
+        if (!kpis) {
+            if (avisoError) avisoError.style.display = 'block';
+            ['kpi-ingresos', 'kpi-egresos', 'kpi-ganancia', 'kpi-calle',
+             'kpi-trabajos-pendientes', 'kpi-sin-presupuesto'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = '—';
+            });
+            document.getElementById('kpi-ganancia').style.color = 'var(--muted)';
+            document.getElementById('kpi-ganancia-nota').innerText = '';
+            document.getElementById('lista-morosos').innerHTML =
+                '<div style="color:var(--muted); margin-top:10px;">No se pudo calcular la deuda de clientes.</div>';
+        } else {
+            if (avisoError) avisoError.style.display = 'none';
+
+            const ingresosReales = Number(kpis.ingresos);
+            const egresosPeriodo = Number(kpis.egresos);
+            const gananciaNeta = Number(kpis.ganancia_neta);
+            // Parte de los egresos que no restó de la ganancia por estar ya contemplada
+            // en el margen de un presupuesto. Explica por qué ganancia ≠ ingresos − egresos.
+            const costosPresupuestados = Number(kpis.costos_presupuestados || 0);
+
+            document.getElementById('kpi-ingresos').innerText = `$ ${fmtMoney(ingresosReales)}`;
+            document.getElementById('kpi-egresos').innerText = `$ ${fmtMoney(egresosPeriodo)}`;
+            document.getElementById('kpi-ganancia').innerText = `$ ${fmtMoney(gananciaNeta)}`;
+            document.getElementById('kpi-ganancia').style.color = gananciaNeta >= 0 ? 'var(--magenta)' : 'var(--red)';
+            document.getElementById('kpi-ganancia-nota').innerText = costosPresupuestados > 0
+                ? `No descuenta $ ${fmtMoney(costosPresupuestados)} ya contemplados en presupuestos`
+                : '';
+            document.getElementById('kpi-calle').innerText = `$ ${fmtMoney(Number(kpis.plata_en_la_calle))}`;
+            document.getElementById('kpi-trabajos-pendientes').innerText = kpis.trabajos_pendientes;
+            document.getElementById('kpi-sin-presupuesto').innerText = kpis.trabajos_sin_presupuesto;
+
+            const htmlMorosos = kpis.morosos.map(m => `
                 <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);">
-                    <span><b>#${m.trabajo_id.substring(0,6).toUpperCase()}</b> - ${m.descripcion_producto}</span>
+                    <span><b>#${m.trabajo_id.substring(0,6).toUpperCase()}</b> - ${esc(m.descripcion_producto)}</span>
                     <span style="color:var(--red); font-weight:bold;">$ ${fmtMoney(Number(m.saldo_pendiente))}</span>
                 </div>
             `).join('');
+            document.getElementById('lista-morosos').innerHTML = htmlMorosos || '<div style="color:var(--green); font-weight:bold; margin-top:10px;">¡No hay morosos! 🎉 Todos los entregados están pagados.</div>';
         }
 
-        // Ingresos, egresos y ganancia salen del backend (única fuente de verdad):
-        // ingresos = plata realmente cobrada; ganancia = margen proporcional a lo
-        // cobrado − gastos. Si el backend no respondió, caemos a lo local.
-        const ingresosReales = kpis ? Number(kpis.ingresos) : 0;
-        const egresosPeriodo = kpis ? Number(kpis.egresos) : totalEgresos;
-        const gananciaNeta = kpis ? Number(kpis.ganancia_neta) : (ingresosReales - egresosPeriodo);
-        // Parte de los egresos que no restó de la ganancia por estar ya contemplada
-        // en el margen de un presupuesto. Explica por qué ganancia ≠ ingresos − egresos.
-        const costosPresupuestados = kpis ? Number(kpis.costos_presupuestados || 0) : 0;
-
-        // Actualizamos los números en pantalla
-        document.getElementById('kpi-ingresos').innerText = `$ ${fmtMoney(ingresosReales)}`;
-        document.getElementById('kpi-egresos').innerText = `$ ${fmtMoney(egresosPeriodo)}`;
-        document.getElementById('kpi-ganancia').innerText = `$ ${fmtMoney(gananciaNeta)}`;
-        document.getElementById('kpi-ganancia-nota').innerText = costosPresupuestados > 0
-            ? `No descuenta $ ${fmtMoney(costosPresupuestados)} ya contemplados en presupuestos`
-            : '';
-        document.getElementById('kpi-calle').innerText = `$ ${fmtMoney(plataEnLaCalle)}`;
-        // Abajo de donde actualizás kpi-calle, sumá estas dos líneas:
+        // KPIs que no dependen del backend de reportes.
         document.getElementById('alerta-estancada').innerText = `$ ${fmtMoney(plataEstancada)}`;
-        document.getElementById('lista-morosos').innerHTML = htmlMorosos || '<div style="color:var(--green); font-weight:bold; margin-top:10px;">¡No hay morosos! 🎉 Todos los entregados están pagados.</div>';
-        // Abajo, donde actualizabas los demás KPIs, agregá estos dos:
         document.getElementById('kpi-cheques').innerText = `$ ${fmtMoney(plataEnCheques)}`;
         document.getElementById('kpi-cheques-pagar').innerText = `$ ${fmtMoney(plataChequesAPagar)}`;
         document.getElementById('alerta-cheques').innerHTML = htmlAlertasCheques || '<div style="color:var(--muted); margin-top:10px;">No hay cheques por vencer esta semana.</div>';
-
-        // Tarjetas nuevas: conteos que devuelve el backend.
-        if (kpis) {
-            document.getElementById('kpi-trabajos-pendientes').innerText = kpis.trabajos_pendientes;
-            document.getElementById('kpi-sin-presupuesto').innerText = kpis.trabajos_sin_presupuesto;
-        }
-
-        // Color dinámico para la ganancia
-        document.getElementById('kpi-ganancia').style.color = gananciaNeta >= 0 ? 'var(--magenta)' : 'var(--red)';
 
         // 4. CÁLCULO DE BLOQUE 2 (GRÁFICOS)
         dibujarGraficoDistribucion(gastosPorCat);
@@ -2844,7 +2967,10 @@ async function cargarDashboard() {
         // Para el gráfico de barras armamos el flujo anual (Agrupamos por mes).
         // Ingresos reales (pagos cobrados + cheques cobrados), mismos criterios
         // que el KPI, para no dejar dos definiciones de "ingreso" conviviendo.
-        dibujarGraficoFlujo(movimientos, cheques, gastosFiltrados, anioActual);
+        // Los gastos van SIN filtrar: el gráfico es anual y ya filtra por año.
+        // Pasarle gastosFiltrados hacía que con "Este mes" se compararan gastos
+        // de un mes contra ingresos de todo el año.
+        dibujarGraficoFlujo(movimientos, cheques, gastos, anioActual);
 
     } catch (e) {
         console.error("Error cargando dashboard:", e);
@@ -2889,6 +3015,9 @@ function dibujarGraficoFlujo(movimientos, cheques, gastos, anio) {
     // Ingreso real: pagos cobrados (método distinto de Cheque)...
     movimientos.forEach(m => {
         if (m.tipo !== 'Pago' || (m.metodo || '').toLowerCase() === 'cheque') return;
+        // Sin 'T00:00:00' a propósito: m.fecha ya trae hora, y un ISO con hora y
+        // sin zona lo parsea JS como local (los de gastos/cheques son sólo fecha
+        // y sin el sufijo caerían en UTC, por eso ahí sí va).
         const f = new Date(m.fecha);
         if (!isNaN(f) && f.getFullYear() === anio) ingresosMes[f.getMonth()] += Number(m.monto);
     });
@@ -3090,7 +3219,7 @@ async function cargarTrabajosDeChequeCliente() {
         const trabajos = await resp.json();
         trabajos.filter(t => t.cliente_id === clienteId).forEach(t => {
             const shortId = t.id.substring(0, 6).toUpperCase();
-            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${t.descripcion_producto} (Total: $${fmtMoney(t.precio_venta)})</option>`;
+            select.innerHTML += `<option value="${t.id}">#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)} (Total: $${fmtMoney(t.precio_venta)})</option>`;
         });
     } catch (e) { console.error("Error cargando trabajos del cliente:", e); }
 }
