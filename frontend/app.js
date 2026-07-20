@@ -1816,6 +1816,20 @@ async function generarInformeTrabajosPDF() {
 
 // REEMPLAZAR abrirDrawerGasto
 let idGastoEditando = null;
+// Última lista de trabajos traída para el select del drawer. La guardamos para
+// que editarGasto pueda recuperar un trabajo ya entregado sin pedirla de nuevo.
+let trabajosParaGasto = [];
+// Categoría cuyo costo ya está contemplado en el margen del presupuesto.
+// Mismo valor que CATEGORIA_COSTO_PRESUPUESTADO en calculos.py.
+const CATEGORIA_COSTO_PRESUPUESTADO = 'Costo Presupuestado';
+
+// Muestra la aclaración de la categoría sólo cuando aplica.
+function actualizarAyudaCategoriaGasto() {
+    const ayuda = document.getElementById('fg_ayuda_categoria');
+    if (!ayuda) return;
+    const esCosteado = document.getElementById('fg_categoria').value === CATEGORIA_COSTO_PRESUPUESTADO;
+    ayuda.style.display = esCosteado ? 'block' : 'none';
+}
 
 async function abrirDrawerGasto() {
     idGastoEditando = null;
@@ -1827,6 +1841,7 @@ async function abrirDrawerGasto() {
         const respT = await fetch(`${API_URL}/trabajos/`);
         if (respT.ok) {
             const trabajos = await respT.json();
+            trabajosParaGasto = trabajos;
             const selectT = document.getElementById('fg_trabajo_id');
             selectT.innerHTML = '<option value="">Ninguno (Gasto general del taller)</option>';
             
@@ -1839,7 +1854,22 @@ async function abrirDrawerGasto() {
         }
     } catch(e) { console.error(e); }
 
+    actualizarAyudaCategoriaGasto();
     toggleDrawer('drawer-nuevo-gasto');
+}
+
+// El select sólo lista trabajos activos, así que un gasto de un trabajo ya
+// entregado no encontraría su opción y el vínculo se perdería en silencio al
+// guardar. Le agregamos la opción que falta para que eso no pase.
+function asegurarOpcionTrabajoGasto(trabajoId) {
+    const selectT = document.getElementById('fg_trabajo_id');
+    if (!trabajoId || selectT.querySelector(`option[value="${trabajoId}"]`)) return;
+
+    const t = trabajosParaGasto.find(x => x.id === trabajoId);
+    const shortId = trabajoId.substring(0, 6).toUpperCase();
+    const detalle = t ? `${t.cantidad}x ${t.descripcion_producto}` : 'trabajo no encontrado';
+    const estado = t ? t.estado.toLowerCase() : 'sin datos';
+    selectT.innerHTML += `<option value="${trabajoId}">(${estado}) #${shortId} - ${detalle}</option>`;
 }
 
 // Abre el drawer de gasto en modo edición, precargado con los datos del gasto elegido
@@ -1856,12 +1886,14 @@ async function editarGasto(id) {
 
         document.getElementById('fg_categoria').value = g.categoria;
         document.getElementById('fg_concepto').value = g.concepto;
+        asegurarOpcionTrabajoGasto(g.trabajo_id);
         document.getElementById('fg_trabajo_id').value = g.trabajo_id || '';
         document.getElementById('fg_metodo').value = g.metodo_pago;
         document.getElementById('fg_comprobante').value = g.comprobante;
         document.getElementById('fg_responsable').value = g.responsable || 'General';
         document.getElementById('fg_monto').value = g.monto;
         document.getElementById('fg_fecha').value = g.fecha;
+        actualizarAyudaCategoriaGasto();
     } catch (e) { console.error("Error al abrir edición de gasto:", e); }
 }
 
@@ -1924,6 +1956,7 @@ async function cargarGastos() {
             if(g.categoria === 'Insumos') colorCat = 'var(--blue)';
             else if(g.categoria === 'Servicios') colorCat = 'var(--amber)';
             else if(g.categoria === 'Sueldos') colorCat = 'var(--magenta)';
+            else if(g.categoria === CATEGORIA_COSTO_PRESUPUESTADO) colorCat = 'var(--green)';
 
             // Novedad: Etiqueta visual de asociación
             let badgeTrabajo = '';
@@ -1972,8 +2005,21 @@ async function guardarGasto(e) {
         return;
     }
 
+    // Un costo presupuestado no resta de la ganancia: sin trabajo asociado no
+    // hay margen contra el cual compensarlo y el gasto desaparecería del cálculo.
+    const categoria = document.getElementById('fg_categoria').value;
+    if (categoria === CATEGORIA_COSTO_PRESUPUESTADO && !tr_id) {
+        Swal.fire(
+            'Falta el trabajo',
+            'Un gasto de categoría "Costo Presupuestado" tiene que estar asociado a un trabajo, porque su costo ya está contemplado en ese presupuesto. Si es un gasto general del taller, elegí otra categoría.',
+            'warning'
+        );
+        restore();
+        return;
+    }
+
     const payload = {
-        categoria: document.getElementById('fg_categoria').value,
+        categoria: categoria,
         concepto: document.getElementById('fg_concepto').value,
         monto: montoGasto,
         fecha: document.getElementById('fg_fecha').value,
@@ -1998,9 +2044,13 @@ async function guardarGasto(e) {
             toggleDrawer('drawer-nuevo-gasto');
             cargarGastos();
             Swal.fire({ title: titulo, icon: 'success', timer: 1500, showConfirmButton: false });
+        } else {
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo guardar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
         }
     } catch (error) {
         console.error("Error al guardar gasto:", error);
+        Swal.fire('Error de conexión', 'No se pudo guardar el gasto.', 'error');
     } finally {
         restore();
     }
@@ -2759,11 +2809,17 @@ async function cargarDashboard() {
         const ingresosReales = kpis ? Number(kpis.ingresos) : 0;
         const egresosPeriodo = kpis ? Number(kpis.egresos) : totalEgresos;
         const gananciaNeta = kpis ? Number(kpis.ganancia_neta) : (ingresosReales - egresosPeriodo);
+        // Parte de los egresos que no restó de la ganancia por estar ya contemplada
+        // en el margen de un presupuesto. Explica por qué ganancia ≠ ingresos − egresos.
+        const costosPresupuestados = kpis ? Number(kpis.costos_presupuestados || 0) : 0;
 
         // Actualizamos los números en pantalla
         document.getElementById('kpi-ingresos').innerText = `$ ${fmtMoney(ingresosReales)}`;
         document.getElementById('kpi-egresos').innerText = `$ ${fmtMoney(egresosPeriodo)}`;
         document.getElementById('kpi-ganancia').innerText = `$ ${fmtMoney(gananciaNeta)}`;
+        document.getElementById('kpi-ganancia-nota').innerText = costosPresupuestados > 0
+            ? `No descuenta $ ${fmtMoney(costosPresupuestados)} ya contemplados en presupuestos`
+            : '';
         document.getElementById('kpi-calle').innerText = `$ ${fmtMoney(plataEnLaCalle)}`;
         // Abajo de donde actualizás kpi-calle, sumá estas dos líneas:
         document.getElementById('alerta-estancada').innerText = `$ ${fmtMoney(plataEstancada)}`;

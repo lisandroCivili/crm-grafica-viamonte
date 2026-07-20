@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 
 import models, schemas
 from database import get_db
-from calculos import ingresos_reales, ganancia_bruta_realizada, total_gastos, calcular_saldo_trabajo
+from calculos import (
+    ingresos_reales, ganancia_bruta_realizada, total_gastos,
+    total_gastos_operativos, calcular_saldo_trabajo,
+)
 
 router = APIRouter(prefix="/api/reportes", tags=["Reportes"])
 
@@ -43,6 +46,11 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
     Los ingresos son plata realmente cobrada (pagos no-cheque + cheques
     cobrados) y la ganancia es proporcional a lo cobrado de cada trabajo con
     presupuesto, menos los gastos. Una consulta por tabla y cruce en memoria.
+
+    Egresos y ganancia usan totales de gasto distintos a propósito: egresos es
+    toda la plata que salió, mientras que la ganancia no descuenta los costos
+    ya contemplados en un presupuesto (estarían restados dos veces). La
+    diferencia se expone en costos_presupuestados para poder explicarla.
     """
     en_periodo = _predicado_periodo(filtro)
 
@@ -52,15 +60,20 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
     cheques = db.query(models.Cheque).all()
     gastos = db.query(models.Gasto).all()
 
+    ids_con_presupuesto = {p.trabajo_id for p in presupuestos if p.trabajo_id}
+
     ingresos = ingresos_reales(movimientos, cheques, en_periodo)
     egresos = total_gastos(gastos, en_periodo)
-    ganancia_bruta = ganancia_bruta_realizada(presupuestos, movimientos, cheques, en_periodo)
-    ganancia_neta = ganancia_bruta - egresos
+    gastos_operativos = total_gastos_operativos(gastos, en_periodo, ids_con_presupuesto)
+    costos_presupuestados = egresos - gastos_operativos
+    ganancia_bruta = ganancia_bruta_realizada(
+        presupuestos, trabajos, movimientos, cheques, en_periodo
+    )
+    ganancia_neta = ganancia_bruta - gastos_operativos
 
     trabajos_pendientes = sum(1 for t in trabajos if t.estado in ESTADOS_PENDIENTES)
 
     # Trabajos que no aportan ganancia porque no tienen presupuesto asociado.
-    ids_con_presupuesto = {p.trabajo_id for p in presupuestos if p.trabajo_id}
     trabajos_sin_presupuesto = sum(
         1 for t in trabajos
         if t.estado != "Cancelado" and t.id not in ids_con_presupuesto
@@ -95,6 +108,7 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
     return schemas.DashboardResponse(
         ingresos=ingresos,
         egresos=egresos,
+        costos_presupuestados=costos_presupuestados,
         ganancia_neta=ganancia_neta,
         trabajos_pendientes=trabajos_pendientes,
         trabajos_sin_presupuesto=trabajos_sin_presupuesto,

@@ -4,6 +4,22 @@ del CRM: todo se hace en Decimal y se cuantiza a 2 decimales.
 
 El frontend puede mostrar previews, pero los valores que se persisten y los
 saldos que se muestran deben salir de acá.
+
+POLÍTICA DE GASTOS VS. MARGEN
+-----------------------------
+El costo de un trabajo presupuestado ya está descontado dentro de su margen: la
+ganancia es una fracción de lo cobrado, no "cobrado menos costos". Por eso, si
+ese mismo papel se carga además como Gasto, el costo quedaría restado dos veces.
+
+La regla es explícita, no automática: un gasto marcado con la categoría
+CATEGORIA_COSTO_PRESUPUESTADO, y cuyo trabajo tenga presupuesto, cuenta como
+egreso (salió plata de la caja) pero NO resta de la ganancia. Cualquier otro
+gasto -alquiler, sueldos, insumos sueltos, o el costo de un trabajo sin
+presupuesto- resta normalmente.
+
+La fracción de ganancia se calcula sobre el precio vigente del trabajo y no
+sobre el margen original, porque el precio se puede editar después de aprobado
+(ver fraccion_ganancia_efectiva).
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -13,6 +29,12 @@ from money import Q2
 
 CERO = Decimal("0.00")
 CIEN = Decimal("100")
+
+# Categoría de gasto cuyo costo YA está contemplado dentro del margen del
+# presupuesto del trabajo (el papel, la tinta, el troquel que se presupuestaron).
+# No vuelve a restar de la ganancia -si no, el costo se descontaría dos veces-,
+# pero sí es plata que salió de la caja y cuenta como egreso.
+CATEGORIA_COSTO_PRESUPUESTADO = "Costo Presupuestado"
 
 
 def _a_fecha(valor):
@@ -110,6 +132,35 @@ def fraccion_ganancia(margen: Decimal) -> Decimal:
     return m / denom
 
 
+def fraccion_ganancia_efectiva(
+    precio_actual: Optional[Decimal],
+    costo_congelado: Optional[Decimal],
+    margen: Decimal,
+) -> Decimal:
+    """Fracción de ganancia real de un trabajo, contemplando ediciones de precio.
+
+    El precio de venta se puede editar después de aprobar el presupuesto (un
+    descuento al cliente), pero el costo ya está hundido: no baja con el precio.
+    Por eso la fracción se recalcula sobre el precio vigente en vez de usar el
+    margen original, que dejaría de ser real: (precio - costo) / precio.
+
+    Si el precio nunca se editó el resultado es idéntico a fraccion_ganancia(margen),
+    porque precio = costo * (1 + margen/100).
+
+    Puede dar negativo si se vendió por debajo del costo: es una pérdida real y
+    se informa como tal.
+
+    Sin costo congelado (presupuesto viejo o de costo cero) se cae al margen del
+    presupuesto, que es el comportamiento histórico.
+    """
+    if costo_congelado is None or Q2(costo_congelado) <= CERO:
+        return fraccion_ganancia(margen)
+    precio = Q2(precio_actual) if precio_actual is not None else CERO
+    if precio <= CERO:
+        return Decimal("0")
+    return (precio - Q2(costo_congelado)) / precio
+
+
 def calcular_saldo_trabajo(
     precio_venta: Decimal, movimientos_trabajo: Iterable, cheques_trabajo: Iterable = ()
 ) -> Decimal:
@@ -189,30 +240,71 @@ def _cobrado_por_trabajo(
 
 
 def ganancia_bruta_realizada(
-    presupuestos: Iterable, movimientos: Iterable, cheques: Iterable,
-    en_periodo: Callable[[date], bool],
+    presupuestos: Iterable, trabajos: Iterable, movimientos: Iterable,
+    cheques: Iterable, en_periodo: Callable[[date], bool],
 ) -> Decimal:
     """Suma de la ganancia proporcional a lo cobrado de cada trabajo.
 
-    Por cada trabajo con presupuesto: cobrado_en_periodo × margen / (100 + margen).
+    Por cada trabajo con presupuesto: cobrado_en_periodo × fracción de ganancia,
+    donde la fracción sale del precio vigente del trabajo y del costo congelado
+    en su presupuesto (ver fraccion_ganancia_efectiva).
     Un trabajo sin presupuesto asociado no aporta ganancia (su cobro sí es ingreso).
+
+    El costo se toma del presupuesto y no de Trabajo.costo_total_materiales
+    porque un trabajo cargado a mano y vinculado a un presupuesto después tiene
+    ese campo en cero, lo que daría una ganancia del 100%.
     """
-    margen_por_trabajo = {
-        p.trabajo_id: p.margen_ganancia for p in presupuestos if p.trabajo_id
+    datos_por_trabajo = {
+        p.trabajo_id: (p.margen_ganancia, p.costo_materiales)
+        for p in presupuestos if p.trabajo_id
     }
+    precio_por_trabajo = {t.id: t.precio_venta for t in trabajos}
+
     total = CERO
     for trabajo_id, cobrado in _cobrado_por_trabajo(movimientos, cheques, en_periodo).items():
-        margen = margen_por_trabajo.get(trabajo_id)
-        if margen is None:
+        datos = datos_por_trabajo.get(trabajo_id)
+        if datos is None:
             continue
-        total += cobrado * fraccion_ganancia(margen)
+        margen, costo = datos
+        precio = precio_por_trabajo.get(trabajo_id)
+        total += cobrado * fraccion_ganancia_efectiva(precio, costo, margen)
     return Q2(total)
 
 
 def total_gastos(gastos: Iterable, en_periodo: Callable[[date], bool]) -> Decimal:
-    """Suma de los gastos cuya fecha cae en el período."""
+    """Suma de los gastos cuya fecha cae en el período.
+
+    Son todos los egresos: la plata que realmente salió de la caja, incluidos
+    los costos que ya estaban presupuestados.
+    """
     total = CERO
     for g in gastos:
         if g.monto is not None and en_periodo(_a_fecha(g.fecha)):
             total += Q2(g.monto)
+    return Q2(total)
+
+
+def total_gastos_operativos(
+    gastos: Iterable, en_periodo: Callable[[date], bool],
+    ids_trabajos_con_presupuesto: Iterable[str],
+) -> Decimal:
+    """Gastos del período que restan de la ganancia (alquiler, sueldos, insumos sueltos).
+
+    Quedan afuera los gastos marcados como 'Costo Presupuestado' de un trabajo
+    que tiene presupuesto: ese costo ya está descontado dentro del margen, así
+    que volver a restarlo lo contaría dos veces.
+
+    Que el trabajo tenga presupuesto es la red de seguridad de la regla: si un
+    gasto quedó marcado como costeado pero su trabajo no tiene presupuesto, ese
+    costo nunca estuvo dentro de ningún margen y resta normalmente, en vez de
+    desaparecer e inflar la ganancia.
+    """
+    con_presupuesto = set(ids_trabajos_con_presupuesto)
+    total = CERO
+    for g in gastos:
+        if g.monto is None or not en_periodo(_a_fecha(g.fecha)):
+            continue
+        if g.categoria == CATEGORIA_COSTO_PRESUPUESTADO and g.trabajo_id in con_presupuesto:
+            continue
+        total += Q2(g.monto)
     return Q2(total)

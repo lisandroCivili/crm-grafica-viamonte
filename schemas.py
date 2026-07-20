@@ -379,10 +379,14 @@ class MorosoResponse(BaseModel):
 class DashboardResponse(BaseModel):
     # Plata realmente cobrada en el período (pagos no-cheque + cheques cobrados).
     ingresos: Decimal
-    # Gastos del período.
+    # Gastos del período: toda la plata que salió de la caja.
     egresos: Decimal
+    # Parte de los egresos que NO resta de la ganancia porque su costo ya estaba
+    # contemplado en el margen de un presupuesto. Se expone para poder explicar
+    # en el dashboard por qué la ganancia no es ingresos - egresos.
+    costos_presupuestados: Decimal = Decimal("0")
     # Suma de la ganancia proporcional a lo cobrado de cada trabajo con
-    # presupuesto, menos los gastos del período.
+    # presupuesto, menos los gastos del período que sí restan.
     ganancia_neta: Decimal
     # Conteos actuales (snapshot, no dependen del período).
     trabajos_pendientes: int

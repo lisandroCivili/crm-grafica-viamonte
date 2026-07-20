@@ -156,6 +156,7 @@
         <div style="background: var(--magenta-soft); padding: 24px 20px; border-radius: 12px; border: 1px solid var(--line); min-width: 180px;">
           <div style="font-size: 12px; color: var(--magenta); font-weight: 600; text-transform: uppercase;">Ganancia Neta</div>
           <div id="kpi-ganancia" style="font-size: 26px; font-weight: bold; color: var(--magenta); margin-top: 8px;">$ 0</div>
+          <div id="kpi-ganancia-nota" style="font-size: 11px; color: var(--muted); margin-top: 4px;"></div>
         </div>
 
         <div style="background: #fff; padding: 24px 20px; border-radius: 12px; border: 1px solid var(--amber); box-shadow: 0 4px 6px rgba(0,0,0,0.02); min-width: 180px;">
@@ -378,6 +379,7 @@
             <option value="Servicios">Servicios (Luz, Internet)</option>
             <option value="Sueldos">Sueldos / Honorarios</option>
             <option value="Mantenimiento">Mantenimiento</option>
+            <option value="Costo Presupuestado">Costo Presupuestado</option>
             <option value="Otros">Otros</option>
           </select>
         </div>
@@ -1156,18 +1158,22 @@
     <div id="drawer-nuevo-gasto" class="drawer">
       <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-gasto')">✖</button>
       <h3 id="titulo-drawer-gasto">Registrar Salida de Dinero</h3>
-      <p style="font-size:12px; color:var(--muted);">Esto restará del cálculo de ganancias a fin de mes.</p>
+      <p style="font-size:12px; color:var(--muted);">Esto restará del cálculo de ganancias a fin de mes, salvo que sea un costo ya contemplado en el presupuesto del trabajo.</p>
       
       <form id="form-gasto" onsubmit="guardarGasto(event)" style="margin-top: 20px;">
         <div class="form-group" style="flex-direction: column; align-items: flex-start;">
           <label style="margin-bottom: 5px;">Categoría *</label>
-          <select id="fg_categoria" required style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+          <select id="fg_categoria" required onchange="actualizarAyudaCategoriaGasto()" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
             <option value="Insumos">Insumos y Materiales</option>
             <option value="Servicios">Servicios (Luz, Internet, Alquiler)</option>
             <option value="Sueldos">Sueldos / Honorarios</option>
             <option value="Mantenimiento">Mantenimiento / Repuestos</option>
+            <option value="Costo Presupuestado" title="El papel, la tinta o el troquel que ya estaban costeados en el presupuesto del trabajo.">Costo Presupuestado (ya en el presupuesto)</option>
             <option value="Otros">Otros Egresos</option>
           </select>
+          <small id="fg_ayuda_categoria" style="color: var(--muted); margin-top: 5px; display: none;">
+            Ya está contemplado en el margen del presupuesto: se registra como egreso pero no vuelve a restar de la ganancia. Requiere elegir el trabajo.
+          </small>
         </div>
 
         <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
