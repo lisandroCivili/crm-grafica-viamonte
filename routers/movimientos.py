@@ -3,9 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
-from calculos import calcular_saldo_cliente
+from calculos import calcular_saldo_cliente, _metodo_es_cheque
 
 router = APIRouter(prefix="/api/movimientos", tags=["Movimientos"])
+
+# Un pago con cheque se registra como Cheque, no como Movimiento: si entrara por
+# acá contaría en el saldo del cliente pero nunca en los ingresos, y si además
+# existe la fila en Cheques el saldo se descuenta dos veces.
+ERROR_PAGO_CHEQUE = "Los cheques se registran desde el módulo Cheques."
 
 @router.get("/", response_model=list[schemas.MovimientoResponse])
 def listar_todos_movimientos(db: Session = Depends(get_db)):
@@ -20,6 +25,9 @@ def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db
     # Todo pago debe imputarse a un trabajo: así aporta a la ganancia del trabajo.
     if mov.tipo == "Pago" and not mov.trabajo_id:
         raise HTTPException(status_code=400, detail="El pago debe estar asociado a un trabajo.")
+
+    if mov.tipo == "Pago" and _metodo_es_cheque(mov.metodo):
+        raise HTTPException(status_code=400, detail=ERROR_PAGO_CHEQUE)
 
     nuevo = models.Movimiento(**mov.model_dump())
     db.add(nuevo)
@@ -58,6 +66,12 @@ def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpda
     nuevo_monto = update_data.get("monto", db_mov.monto)
     if nuevo_tipo == "Pago" and nuevo_monto <= Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto del pago debe ser mayor a 0.")
+
+    # Sólo validamos si el request toca tipo o método: así una fila histórica con
+    # metodo='Cheque' sigue siendo editable en sus otros campos.
+    if ("tipo" in update_data or "metodo" in update_data) and nuevo_tipo == "Pago":
+        if _metodo_es_cheque(update_data.get("metodo", db_mov.metodo)):
+            raise HTTPException(status_code=400, detail=ERROR_PAGO_CHEQUE)
 
     for key, value in update_data.items():
         setattr(db_mov, key, value)

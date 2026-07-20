@@ -169,3 +169,16 @@ class Cheque(Base):
     fecha_cobro = Column(Date, nullable=False)
     estado = Column(String, default="En Cartera") # En Cartera, Depositado, Cobrado, Endosado, Rechazado
     destinatario_endoso = Column(String, nullable=True)
+    # Fecha en la que el cheque se endosó. Endosar equivale a cobrar (el dinero
+    # realiza la ganancia del trabajo) y a la vez pagar: por eso los cálculos la
+    # usan igual que fecha_cobro. Se completa al pasar el cheque a 'Endosado'.
+    fecha_endoso = Column(Date, nullable=True)
+
+class HistorialCheque(Base):
+    __tablename__ = "historial_cheques"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cheque_id = Column(String, ForeignKey("cheques.id"), nullable=False)
+    estado_anterior = Column(String, nullable=True)
+    estado_nuevo = Column(String, nullable=True)
+    detalle = Column(String, nullable=False) # Ej: "monto 5000 -> 6000" o el motivo de una reversión
+    fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc))

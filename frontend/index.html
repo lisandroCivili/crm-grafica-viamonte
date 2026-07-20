@@ -163,10 +163,16 @@
           <div id="kpi-calle" style="font-size: 26px; font-weight: bold; color: var(--amber); margin-top: 8px;">$ 0</div>
         </div>
 
-        <!-- Tarjeta de Cheques -->
+        <!-- Tarjeta de Cheques: sólo los recibidos son plata por cobrar -->
         <div style="background: #fff; padding: 24px 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02); min-width: 180px;">
           <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Cheques en Cartera</div>
           <div id="kpi-cheques" style="font-size: 26px; font-weight: bold; color: var(--ink); margin-top: 8px;">$ 0</div>
+        </div>
+
+        <!-- Contraparte: cheques propios entregados, plata que va a salir -->
+        <div style="background: #fff; padding: 24px 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02); min-width: 180px;">
+          <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Cheques a Pagar</div>
+          <div id="kpi-cheques-pagar" style="font-size: 26px; font-weight: bold; color: var(--red); margin-top: 8px;">$ 0</div>
         </div>
 
         <!-- Trabajos pendientes (en el taller, ni entregados ni cancelados) -->
@@ -1236,9 +1242,22 @@
 
         <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
           <label id="lbl-fch-cliente" style="margin-bottom: 5px;">Cliente (Emisor)</label>
-          <select id="fch_cliente" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
+          <select id="fch_cliente" onchange="cargarTrabajosDeChequeCliente()" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;">
             <!-- Se llena con JS -->
           </select>
+        </div>
+
+        <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 15px;">
+          <label id="lbl-fch-trabajo" style="margin-bottom: 5px;">Trabajo a imputar (opcional)</label>
+          <select id="fch_trabajo_id" style="width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px;" title="Si lo asignás, al cobrarse el cheque aporta la ganancia de ese trabajo al dashboard.">
+            <!-- Se llena con JS según el cliente elegido -->
+          </select>
+          <small style="color: var(--muted); margin-top: 5px;">Sin trabajo, el cheque salda la deuda pero no suma ganancia.</small>
+        </div>
+
+        <div class="form-group" id="grupo-fch-destinatario" style="flex-direction: column; align-items: flex-start; margin-top: 15px; display: none;">
+          <label style="margin-bottom: 5px;">Destinatario (Proveedor)</label>
+          <input type="text" id="fch_destinatario" placeholder="Ej: Papelera del Sur" style="width: 100%; padding: 10px;">
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 15px;">

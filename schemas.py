@@ -326,6 +326,7 @@ class ChequeBase(BaseModel):
     fecha_cobro: date
     estado: str = "En Cartera"
     destinatario_endoso: Optional[str] = None
+    fecha_endoso: Optional[date] = None
 
 class ChequeCreate(ChequeBase):
     pass
@@ -341,9 +342,22 @@ class ChequeUpdate(BaseModel):
     fecha_cobro: Optional[date] = None
     estado: Optional[str] = None
     destinatario_endoso: Optional[str] = None
+    fecha_endoso: Optional[date] = None
+    # No es una columna del cheque: justifica revertir un estado final
+    # (Cobrado / Endosado / Rechazado) y queda asentado en el historial.
+    motivo: Optional[str] = None
 
 class ChequeResponse(ChequeBase):
     id: str
+    model_config = {"from_attributes": True}
+
+class HistorialChequeResponse(BaseModel):
+    id: str
+    cheque_id: str
+    estado_anterior: Optional[str] = None
+    estado_nuevo: Optional[str] = None
+    detalle: str
+    fecha: datetime
     model_config = {"from_attributes": True}
 
 

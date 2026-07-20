@@ -27,6 +27,25 @@ def _metodo_es_cheque(metodo) -> bool:
     return (metodo or "").strip().lower() == "cheque"
 
 
+def _fecha_realizacion_cheque(ch):
+    """Fecha en la que un cheque Recibido convirtió el papel en plata, o None.
+
+    - 'Cobrado': se acreditó, vale su fecha_cobro.
+    - 'Endosado': se usó para pagarle a un proveedor. Endosar es un cobro y un
+      pago simultáneos: acá se computa la pata de ingreso (la de egreso es el
+      Gasto que se registra al endosar), por eso vale su fecha_endoso.
+    Cualquier otro estado todavía no realizó nada.
+    """
+    if getattr(ch, "clasificacion", "Recibido") != "Recibido" or ch.monto is None:
+        return None
+    estado = getattr(ch, "estado", None)
+    if estado == "Cobrado":
+        return ch.fecha_cobro
+    if estado == "Endosado":
+        return getattr(ch, "fecha_endoso", None)
+    return None
+
+
 def sumar_detalles_costos(detalles: Optional[Mapping[str, object]]) -> Decimal:
     """Suma los valores del diccionario de costos de un presupuesto."""
     total = CERO
@@ -126,7 +145,8 @@ def ingresos_reales(
     """Plata efectivamente cobrada en el período.
 
     = movimientos 'Pago' con método distinto de Cheque (por su fecha)
-    + cheques Recibidos en estado 'Cobrado' (por su fecha de cobro).
+    + cheques Recibidos ya realizados: 'Cobrado' (por su fecha de cobro) o
+      'Endosado' (por su fecha de endoso, ver _fecha_realizacion_cheque).
     """
     total = CERO
     for m in movimientos:
@@ -137,11 +157,10 @@ def ingresos_reales(
         if en_periodo(_a_fecha(m.fecha)):
             total += Q2(m.monto)
     for ch in cheques:
-        if getattr(ch, "clasificacion", "Recibido") != "Recibido":
+        fecha = _fecha_realizacion_cheque(ch)
+        if fecha is None:
             continue
-        if getattr(ch, "estado", None) != "Cobrado" or ch.monto is None:
-            continue
-        if en_periodo(_a_fecha(ch.fecha_cobro)):
+        if en_periodo(_a_fecha(fecha)):
             total += Q2(ch.monto)
     return Q2(total)
 
@@ -159,11 +178,12 @@ def _cobrado_por_trabajo(
         if en_periodo(_a_fecha(m.fecha)):
             cobrado[m.trabajo_id] = cobrado.get(m.trabajo_id, CERO) + Q2(m.monto)
     for ch in cheques:
-        if getattr(ch, "clasificacion", "Recibido") != "Recibido":
+        if not ch.trabajo_id:
             continue
-        if getattr(ch, "estado", None) != "Cobrado" or ch.monto is None or not ch.trabajo_id:
+        fecha = _fecha_realizacion_cheque(ch)
+        if fecha is None:
             continue
-        if en_periodo(_a_fecha(ch.fecha_cobro)):
+        if en_periodo(_a_fecha(fecha)):
             cobrado[ch.trabajo_id] = cobrado.get(ch.trabajo_id, CERO) + Q2(ch.monto)
     return cobrado
 
