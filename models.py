@@ -9,6 +9,15 @@ from money import Money, Cantidad
 # valida contra esta lista y el frontend arma el Kanban con estos mismos nombres.
 ESTADOS_TRABAJO = ["Aprobado", "En Diseño", "En Producción", "Entregado", "Cancelado"]
 
+# Estados por los que puede pasar un Cheque. Mismo criterio que ESTADOS_TRABAJO:
+# única fuente de verdad, validada desde el schema para que un estado inventado
+# no llegue nunca a la base. Las transiciones válidas entre ellos las define
+# routers/cheques.py; esto sólo acota el universo de valores posibles.
+ESTADOS_CHEQUE = ["En Cartera", "Depositado", "Cobrado", "Endosado", "Rechazado"]
+
+# Estado con el que nace un cheque. Los demás se alcanzan por transición.
+ESTADO_CHEQUE_INICIAL = "En Cartera"
+
 
 def ahora_local():
     """Hora local del taller para los registros que se agrupan por día.

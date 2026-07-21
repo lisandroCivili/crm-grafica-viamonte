@@ -1,7 +1,79 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+import models
+
+
+def _validar_detalles_costos(valor: Optional[dict]) -> Optional[dict]:
+    """Exige que cada costo del presupuesto sea un número.
+
+    Mapa de costos: {"papel": 1200, "tinta": "350.50"}. Antes era un dict libre
+    y un valor vacío o un texto llegaba hasta sumar_detalles_costos, que reventaba
+    con InvalidOperation y devolvía un 500 opaco; acá se corta con un 422 que
+    dice qué costo está mal.
+
+    Valida SIN convertir: el dict se persiste en una columna JSON, y un Decimal
+    no es serializable a JSON. Los valores se guardan como llegaron y es
+    calculos.py, con Q2(), el que los pasa a Decimal para operar.
+
+    Un valor en null se acepta: significa "costo no cargado" y calculos.py ya lo
+    saltea, así que rechazarlo rompería lo que hoy funciona.
+    """
+    if valor is None:
+        return valor
+    for clave, monto in valor.items():
+        if monto is None:
+            continue
+        try:
+            importe = Decimal(str(monto))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValueError(
+                f"El costo '{clave}' tiene que ser un número (recibido: {monto!r})."
+            )
+        if importe < 0:
+            raise ValueError(f"El costo '{clave}' no puede ser negativo (recibido: {monto!r}).")
+    return valor
+
+
+def _validar_margen(valor: Optional[Decimal]) -> Optional[Decimal]:
+    """El margen puede ser negativo, pero no tanto como para dar precio negativo.
+
+    Vender bajo costo es una decisión comercial válida (liquidar un saldo de
+    papel, no perder un cliente), y -100% es regalar el trabajo: precio final 0,
+    el mismo caso que la reimpresión de cortesía. Más abajo de -100% el precio
+    da negativo, o sea pagarle al cliente por llevárselo.
+
+    Importa que se corte acá y no sólo en el precio: convertir_presupuesto crea
+    el Trabajo por ORM con el precio_final ya calculado, sin pasar por
+    TrabajoCreate. Sin esta validación ese es el camino por el que un importe
+    negativo entra a trabajos sin que ningún schema lo mire.
+    """
+    if valor is not None and valor < Decimal("-100"):
+        raise ValueError(
+            f"El margen no puede ser menor a -100% (recibido: {valor}%): el precio daría negativo."
+        )
+    return valor
+
+
+def _validar_monto_no_negativo(valor: Optional[Decimal]) -> Optional[Decimal]:
+    """Rechaza importes negativos. Compartido por trabajos, movimientos,
+    gastos y cheques.
+
+    Un importe negativo no existe en el taller y encima invierte el signo de los
+    cálculos sin avisar: un gasto negativo aparece como ganancia, un pago
+    negativo agranda la deuda del cliente y un precio negativo hace que un
+    trabajo entregado figure como plata a favor. calculos.py opera bien con lo
+    que recibe, así que la única forma de que no pase es que no llegue a la base.
+
+    El cero sí se acepta: un trabajo de cortesía (una reimpresión por un error
+    propio) se factura en 0 y es legítimo. Para plata que entra o sale de verdad
+    lo filtran los routers, que ya ignoran los movimientos en 0.
+    """
+    if valor is not None and valor < 0:
+        raise ValueError(f"El importe no puede ser negativo (recibido: {valor}).")
+    return valor
 
 # --- ESQUEMAS PARA CLIENTES ---
 
@@ -65,6 +137,10 @@ class TrabajoBase(BaseModel):
     papel_id: Optional[str] = None
     cantidad_pliegos: Optional[Decimal] = None
 
+    _montos_validos = field_validator("precio_venta", "costo_total_materiales")(
+        _validar_monto_no_negativo
+    )
+
 class TrabajoCreate(TrabajoBase):
     pass
 
@@ -86,6 +162,8 @@ class TrabajoUpdate(BaseModel):
     papel_id: Optional[str] = None
     cantidad_pliegos: Optional[Decimal] = None
     notas_iniciales: Optional[str] = None
+
+    _monto_valido = field_validator("precio_venta")(_validar_monto_no_negativo)
 
 class TrabajoResponse(TrabajoBase):
     id: str
@@ -142,6 +220,12 @@ class PresupuestoBase(BaseModel):
     convertido_a_trabajo: Optional[bool] = False
     fecha_creacion: date
 
+    _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
+    _margen_valido = field_validator("margen_ganancia")(_validar_margen)
+    _montos_validos = field_validator("costo_materiales", "precio_final")(
+        _validar_monto_no_negativo
+    )
+
 class PresupuestoCreate(PresupuestoBase):
     # El backend recalcula costo_materiales y precio_final a partir de
     # detalles_costos y margen_ganancia, así que estos pueden venir en 0.
@@ -184,6 +268,9 @@ class PresupuestoUpdate(BaseModel):
     margen_ganancia: Optional[Decimal] = None
     estado: Optional[str] = None
 
+    _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
+    _margen_valido = field_validator("margen_ganancia")(_validar_margen)
+
 
 # --- ESQUEMAS PARA MOVIMIENTOS ---
 class MovimientoCreate(BaseModel):
@@ -193,6 +280,8 @@ class MovimientoCreate(BaseModel):
     tipo: str
     metodo: Optional[str] = None
     descripcion: str
+
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
 
 class MovimientoResponse(MovimientoCreate):
     id: str
@@ -206,6 +295,8 @@ class MovimientoUpdate(BaseModel):
     tipo: Optional[str] = None
     metodo: Optional[str] = None
     descripcion: Optional[str] = None
+
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
 
 
 # --- ESQUEMAS PARA NOTAS ---
@@ -235,6 +326,8 @@ class GastoBase(BaseModel):
     responsable: str = "General"
     trabajo_id: Optional[str] = None
 
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
+
 class GastoCreate(GastoBase):
     pass
 
@@ -252,6 +345,8 @@ class GastoUpdate(BaseModel):
     comprobante: Optional[str] = None
     responsable: Optional[str] = None
     trabajo_id: Optional[str] = None
+
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
 
 
 # --- ESQUEMAS PARA STOCK ---
@@ -320,6 +415,32 @@ class HistorialStockResponse(BaseModel):
 
 
 # --- ESQUEMAS PARA CHEQUES ---
+
+def _validar_estado_cheque(valor: Optional[str]) -> Optional[str]:
+    """Acota el estado a ESTADOS_CHEQUE. Compartido por Create y Update.
+
+    Antes 'estado' era un str libre: se podía crear o dejar un cheque en
+    'banana' y ningún cálculo lo reconocía después.
+    """
+    if valor is not None and valor not in models.ESTADOS_CHEQUE:
+        raise ValueError(
+            f"Estado inválido: '{valor}'. Válidos: {', '.join(models.ESTADOS_CHEQUE)}."
+        )
+    return valor
+
+
+def _completar_fecha_endoso(datos):
+    """Un cheque Endosado sin fecha de endoso nunca cuenta como ingreso.
+
+    Endosar equivale a cobrar, y calculos.py usa fecha_endoso para saber cuándo
+    se realizó esa plata: sin ella el cheque queda invisible para siempre. Se
+    completa acá y no en el router para que valga igual al crear y al editar.
+    """
+    if datos.estado == "Endosado" and datos.fecha_endoso is None:
+        datos.fecha_endoso = date.today()
+    return datos
+
+
 class ChequeBase(BaseModel):
     cliente_id: Optional[str] = None
     clasificacion: str = "Recibido"   # 'Recibido' (de cliente) o 'Emitido' (a proveedor)
@@ -329,9 +450,16 @@ class ChequeBase(BaseModel):
     monto: Decimal
     fecha_emision: date
     fecha_cobro: date
-    estado: str = "En Cartera"
+    estado: str = models.ESTADO_CHEQUE_INICIAL
     destinatario_endoso: Optional[str] = None
     fecha_endoso: Optional[date] = None
+
+    _estado_valido = field_validator("estado")(_validar_estado_cheque)
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
+
+    @model_validator(mode="after")
+    def completar_fecha_endoso(self):
+        return _completar_fecha_endoso(self)
 
 class ChequeCreate(ChequeBase):
     pass
@@ -351,6 +479,13 @@ class ChequeUpdate(BaseModel):
     # No es una columna del cheque: justifica revertir un estado final
     # (Cobrado / Endosado / Rechazado) y queda asentado en el historial.
     motivo: Optional[str] = None
+
+    _estado_valido = field_validator("estado")(_validar_estado_cheque)
+    _monto_valido = field_validator("monto")(_validar_monto_no_negativo)
+
+    @model_validator(mode="after")
+    def completar_fecha_endoso(self):
+        return _completar_fecha_endoso(self)
 
 class ChequeResponse(ChequeBase):
     id: str
@@ -384,6 +519,11 @@ class MorosoResponse(BaseModel):
 class DashboardResponse(BaseModel):
     # Plata realmente cobrada en el período (pagos no-cheque + cheques cobrados).
     ingresos: Decimal
+    # Parte de esos ingresos que no está imputada a ningún trabajo. Es plata real
+    # que entró pero que no aporta ganancia (sin trabajo no hay presupuesto del
+    # cual sacar el costo). Se expone para que quede visible y se pueda imputar
+    # después, en vez de perderse entre ingresos y ganancia.
+    ingresos_sin_imputar: Decimal = Decimal("0")
     # Gastos del período: toda la plata que salió de la caja.
     egresos: Decimal
     # Parte de los egresos que NO resta de la ganancia porque su costo ya estaba

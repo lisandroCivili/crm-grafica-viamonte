@@ -23,7 +23,7 @@ sobre el margen original, porque el precio se puede editar después de aprobado
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Callable, Iterable, Mapping, Optional, Tuple
+from typing import Callable, Iterable, Iterator, Mapping, Optional, Tuple
 
 from money import Q2
 
@@ -179,6 +179,15 @@ def calcular_saldo_cliente(
 
     total_facturado = suma de precio_venta de trabajos no cancelados.
     total_pagado    = movimientos de tipo 'Pago' + cheques recibidos no rechazados.
+
+    El saldo puede dar NEGATIVO y eso es correcto: significa dinero a favor del
+    cliente. Pasa cuando un trabajo señado se cancela (sale de total_facturado
+    pero su seña sigue contando como pago) o cuando hay un sobrepago. La regla
+    del taller es que esa plata queda a cuenta del próximo trabajo: no se
+    devuelve ni se pierde, por eso el cálculo la conserva.
+
+    Pendiente en el frontend: mostrar el saldo negativo como "Saldo a favor" en
+    verde, no como deuda en rojo con un signo menos.
     """
     total_facturado = CERO
     for t in trabajos:
@@ -190,52 +199,80 @@ def calcular_saldo_cliente(
     return total_facturado, total_pagado, saldo
 
 
-def ingresos_reales(
+def _cobros_realizados(
     movimientos: Iterable, cheques: Iterable, en_periodo: Callable[[date], bool]
-) -> Decimal:
-    """Plata efectivamente cobrada en el período.
+) -> Iterator[Tuple[Optional[str], Decimal]]:
+    """Itera (trabajo_id, monto) de cada cobro realizado en el período.
 
-    = movimientos 'Pago' con método distinto de Cheque (por su fecha)
-    + cheques Recibidos ya realizados: 'Cobrado' (por su fecha de cobro) o
-      'Endosado' (por su fecha de endoso, ver _fecha_realizacion_cheque).
+    Un cobro es plata que efectivamente entró:
+    - movimientos 'Pago' con método distinto de Cheque, por su fecha;
+    - cheques Recibidos ya realizados, 'Cobrado' por su fecha de cobro o
+      'Endosado' por su fecha de endoso (ver _fecha_realizacion_cheque).
+
+    El trabajo_id puede venir en None: tanto un pago como un cheque se pueden
+    cobrar sin imputar a un trabajo puntual (un pago a cuenta). Esa plata es
+    ingreso, pero no aporta ganancia porque no hay presupuesto contra el cual
+    calcularla; ver ingresos_sin_imputar.
+
+    Base común de ingresos_reales, ingresos_sin_imputar y _cobrado_por_trabajo,
+    para que las tres no se puedan desincronizar.
     """
-    total = CERO
     for m in movimientos:
         if getattr(m, "tipo", None) != "Pago" or m.monto is None:
             continue
         if _metodo_es_cheque(getattr(m, "metodo", None)):
             continue
         if en_periodo(_a_fecha(m.fecha)):
-            total += Q2(m.monto)
+            yield getattr(m, "trabajo_id", None), Q2(m.monto)
     for ch in cheques:
         fecha = _fecha_realizacion_cheque(ch)
         if fecha is None:
             continue
         if en_periodo(_a_fecha(fecha)):
-            total += Q2(ch.monto)
+            yield getattr(ch, "trabajo_id", None), Q2(ch.monto)
+
+
+def ingresos_reales(
+    movimientos: Iterable, cheques: Iterable, en_periodo: Callable[[date], bool]
+) -> Decimal:
+    """Plata efectivamente cobrada en el período, esté imputada a un trabajo o no."""
+    total = CERO
+    for _, monto in _cobros_realizados(movimientos, cheques, en_periodo):
+        total += monto
+    return Q2(total)
+
+
+def ingresos_sin_imputar(
+    movimientos: Iterable, cheques: Iterable, en_periodo: Callable[[date], bool]
+) -> Decimal:
+    """Parte de los ingresos del período que no está imputada a ningún trabajo.
+
+    Es plata real que entró, pero que no aporta ganancia: sin trabajo no hay
+    presupuesto del cual sacar el costo. Se expone en el dashboard para que esa
+    plata quede visible y se pueda imputar después, en vez de desaparecer entre
+    la diferencia de ingresos y ganancia.
+
+    Siempre es <= ingresos_reales sobre el mismo período.
+    """
+    total = CERO
+    for trabajo_id, monto in _cobros_realizados(movimientos, cheques, en_periodo):
+        if not trabajo_id:
+            total += monto
     return Q2(total)
 
 
 def _cobrado_por_trabajo(
     movimientos: Iterable, cheques: Iterable, en_periodo: Callable[[date], bool]
 ) -> Mapping[str, Decimal]:
-    """Plata cobrada en el período, agrupada por trabajo (misma regla que ingresos)."""
+    """Plata cobrada en el período, agrupada por trabajo (misma regla que ingresos).
+
+    Los cobros sin trabajo imputado quedan afuera: no hay a qué sumarlos.
+    """
     cobrado: dict[str, Decimal] = {}
-    for m in movimientos:
-        if getattr(m, "tipo", None) != "Pago" or m.monto is None or not m.trabajo_id:
+    for trabajo_id, monto in _cobros_realizados(movimientos, cheques, en_periodo):
+        if not trabajo_id:
             continue
-        if _metodo_es_cheque(getattr(m, "metodo", None)):
-            continue
-        if en_periodo(_a_fecha(m.fecha)):
-            cobrado[m.trabajo_id] = cobrado.get(m.trabajo_id, CERO) + Q2(m.monto)
-    for ch in cheques:
-        if not ch.trabajo_id:
-            continue
-        fecha = _fecha_realizacion_cheque(ch)
-        if fecha is None:
-            continue
-        if en_periodo(_a_fecha(fecha)):
-            cobrado[ch.trabajo_id] = cobrado.get(ch.trabajo_id, CERO) + Q2(ch.monto)
+        cobrado[trabajo_id] = cobrado.get(trabajo_id, CERO) + monto
     return cobrado
 
 

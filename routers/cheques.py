@@ -1,5 +1,3 @@
-from datetime import date
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
@@ -19,7 +17,11 @@ _TRANSICIONES = {
 
 
 def _validar_transicion(actual: str, nuevo: str, motivo: str | None) -> None:
-    """Valida el paso de un estado a otro. Lanza HTTPException si no corresponde."""
+    """Valida el paso de un estado a otro. Lanza HTTPException si no corresponde.
+
+    Que 'nuevo' sea un estado existente ya lo garantiza el schema contra
+    models.ESTADOS_CHEQUE: acá sólo se decide si el paso es legítimo.
+    """
     if actual in ESTADOS_FINALES:
         # Revertir un estado final se permite, pero nunca en silencio.
         if not motivo:
@@ -102,9 +104,8 @@ def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, 
                     ),
                 )
 
-    # Endosar equivale a cobrar: dejamos registrada la fecha para los cálculos.
-    if cambia_estado and nuevo_estado == "Endosado" and not cambios.get("fecha_endoso"):
-        cambios["fecha_endoso"] = date.today()
+    # La fecha de endoso la completa ChequeUpdate (schemas.py) para que valga
+    # igual al crear y al editar; acá ya llega resuelta.
 
     # Historial: primero los cambios de monto/clasificación, después el de estado.
     for campo in ("monto", "clasificacion"):

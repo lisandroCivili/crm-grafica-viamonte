@@ -1,0 +1,4 @@
+# Dependencias de desarrollo. NO se empaquetan en el .exe:
+# requirements.txt es lo que necesita el sistema para correr.
+-r requirements.txt
+pytest==9.1.1

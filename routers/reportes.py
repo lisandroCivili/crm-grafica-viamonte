@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from calculos import (
-    ingresos_reales, ganancia_bruta_realizada, total_gastos,
-    total_gastos_operativos, calcular_saldo_trabajo,
+    ingresos_reales, ingresos_sin_imputar, ganancia_bruta_realizada,
+    total_gastos, total_gastos_operativos, calcular_saldo_trabajo,
 )
 
 router = APIRouter(prefix="/api/reportes", tags=["Reportes"])
@@ -63,6 +63,7 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
     ids_con_presupuesto = {p.trabajo_id for p in presupuestos if p.trabajo_id}
 
     ingresos = ingresos_reales(movimientos, cheques, en_periodo)
+    sin_imputar = ingresos_sin_imputar(movimientos, cheques, en_periodo)
     egresos = total_gastos(gastos, en_periodo)
     gastos_operativos = total_gastos_operativos(gastos, en_periodo, ids_con_presupuesto)
     costos_presupuestados = egresos - gastos_operativos
@@ -107,6 +108,7 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
 
     return schemas.DashboardResponse(
         ingresos=ingresos,
+        ingresos_sin_imputar=sin_imputar,
         egresos=egresos,
         costos_presupuestados=costos_presupuestados,
         ganancia_neta=ganancia_neta,

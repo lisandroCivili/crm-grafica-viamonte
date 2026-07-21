@@ -292,6 +292,14 @@ def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
     if tiene_gastos:
         raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene gastos asociados.")
 
+    # Los cheques también apuntan al trabajo por FK y faltaban en esta lista: el
+    # DELETE llegaba a la base y salía por IntegrityError como un 500 sin
+    # explicación. Un cheque imputado es plata comprometida, mismo criterio que
+    # un pago: el trabajo se cancela, no se borra.
+    tiene_cheques = db.query(models.Cheque).filter(models.Cheque.trabajo_id == trabajo_id).first()
+    if tiene_cheques:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene cheques imputados. Cancelalo en su lugar.")
+
     db.query(models.Nota).filter(models.Nota.trabajo_id == trabajo_id).update({"trabajo_id": None})
     db.delete(db_trabajo)
     db.commit()
@@ -380,11 +388,36 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
 
     if not db_trabajo.orden_impresa:
         numero_orden = _generar_numero_orden(db)
-        _descontar_papel(db, db_trabajo, numero_orden, forzar)
-        db_trabajo.numero_orden = numero_orden
-        db_trabajo.orden_impresa = True
-        db_trabajo.fecha_orden_impresa = datetime.now(timezone.utc)
-        db.commit()
+
+        # El reclamo de la impresión es un UPDATE condicional, y no un
+        # `db_trabajo.orden_impresa = True`, porque leer el flag y escribirlo
+        # son dos pasos: un doble clic mete dos requests en el medio, ambos lo
+        # leen en False y ambos descuentan. El síntoma no es stock de menos
+        # (las dos sesiones leen la misma cantidad y una pisa a la otra) sino
+        # un historial con dos descuentos para una sola orden: el papel y la
+        # auditoría dejan de coincidir. Acá gana uno solo: el WHERE lo resuelve
+        # la base, que es el único punto donde los dos requests se cruzan.
+        reclamada = (
+            db.query(models.Trabajo)
+            .filter(models.Trabajo.id == trabajo_id, models.Trabajo.orden_impresa.isnot(True))
+            .update(
+                {
+                    "orden_impresa": True,
+                    "numero_orden": numero_orden,
+                    "fecha_orden_impresa": datetime.now(timezone.utc),
+                },
+                synchronize_session=False,
+            )
+        )
+
+        if reclamada:
+            # Si el papel no alcanza, _descontar_papel corta con un 400 y el
+            # reclamo se va con la transacción: la orden queda sin imprimir.
+            _descontar_papel(db, db_trabajo, numero_orden, forzar)
+            db.commit()
+        else:
+            # Perdimos la carrera: el otro request ya la imprimió y descontó.
+            db.rollback()
         db.refresh(db_trabajo)
 
     pdf = construir_orden_pdf(db_trabajo, db_trabajo.cliente, db_trabajo.papel)

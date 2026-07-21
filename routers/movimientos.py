@@ -22,9 +22,11 @@ def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db
     if mov.tipo == "Pago" and mov.monto <= Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto del pago debe ser mayor a 0.")
 
-    # Todo pago debe imputarse a un trabajo: así aporta a la ganancia del trabajo.
-    if mov.tipo == "Pago" and not mov.trabajo_id:
-        raise HTTPException(status_code=400, detail="El pago debe estar asociado a un trabajo.")
+    # El trabajo es opcional a propósito: hay cobros que no van contra un trabajo
+    # puntual (un pago a cuenta). Misma política que los cheques recibidos, que ya
+    # lo permitían: si un pago en efectivo se exigiera imputado y el mismo cobro
+    # con cheque no, la regla dependería del medio de pago y no del hecho económico.
+    # Esa plata igual queda visible: el dashboard la informa en ingresos_sin_imputar.
 
     if mov.tipo == "Pago" and _metodo_es_cheque(mov.metodo):
         raise HTTPException(status_code=400, detail=ERROR_PAGO_CHEQUE)

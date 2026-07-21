@@ -36,7 +36,24 @@ def _calcular_pliegos(largo_cm, ancho_cm, gramaje_grs, peso_total_kg, pos: int) 
             detail=f"Ítem {pos}: largo, ancho, gramaje y peso deben ser mayores a cero.",
         )
     peso_pliego_kg = (largo_cm * ancho_cm * gramaje_grs) / DIVISOR_PESO_PLIEGO
-    return (peso_total_kg / peso_pliego_kg).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    pliegos = (peso_total_kg / peso_pliego_kg).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # Si el peso no llega ni a medio pliego el redondeo da cero, y una compra de
+    # cero pliegos no es una compra: daba de alta un artículo vacío, asentaba un
+    # movimiento de historial de 0 y la plata gastada se perdía (sin pliegos no
+    # hay contra qué dividir el costo). Nunca es lo que quiso hacer el operador:
+    # casi siempre son las medidas en mm en vez de cm, o el peso en grs en vez
+    # de kg. Por eso el mensaje muestra las dos cifras que hay que comparar.
+    if pliegos <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Ítem {pos}: {Q3(peso_total_kg)} kg no alcanzan para un pliego de "
+                f"{Q3(largo_cm)}x{Q3(ancho_cm)} cm en {Q3(gramaje_grs)} grs, que pesa "
+                f"{Q3(peso_pliego_kg)} kg. Revisá las medidas y el peso."
+            ),
+        )
+    return pliegos
 
 
 def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) -> models.ArticuloStock:
@@ -70,8 +87,10 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
         motivo = f"Compra: +{cantidad} {unidad}"
 
     costo_unitario = item.costo_unitario
-    # Guardia de división: _calcular_pliegos devuelve 0 si el peso comprado no
-    # llega ni a medio pliego. Sin esto revienta con DivisionByZero.
+    # Guardia de división. Los dos caminos de arriba ya garantizan cantidad > 0
+    # (por Kg lo valida _calcular_pliegos, por unidades el chequeo del else),
+    # así que hoy nunca se cumple; se deja porque el costo de la guarda es nulo
+    # y el de un DivisionByZero en una compra es perder la transacción entera.
     if item.costo_total is not None and cantidad > 0:
         costo_unitario = Q2(item.costo_total / cantidad)
 

@@ -366,14 +366,24 @@ async function guardarPago(e) {
         return;
     }
 
-    // Todo pago se imputa a un trabajo (para calcular su ganancia).
+    // Un pago sin trabajo salda la deuda pero nunca aporta ganancia: avisamos,
+    // sin bloquear (hay cobros a cuenta que no van contra un trabajo puntual).
+    // Mismo criterio que el alta de cheques recibidos.
     if (!trabajo_id) {
-        Swal.fire('Falta el trabajo', 'Elegí a qué trabajo se imputa el pago.', 'warning');
-        restore();
-        return;
+        const conf = await Swal.fire({
+            title: 'Pago sin trabajo asignado',
+            html: 'Este pago saldará la deuda del cliente, pero <b>no se imputará a ningún trabajo</b>, ' +
+                  'así que no aportará ganancia al dashboard.<br><br>Podés asignarle el trabajo más adelante.',
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Guardar igual',
+            cancelButtonText: 'Volver y asignarlo',
+            confirmButtonColor: '#D5006D'
+        });
+        if (!conf.isConfirmed) { restore(); return; }
     }
 
-    const shortId = trabajo_id.substring(0,6).toUpperCase();
+    const shortId = trabajo_id ? trabajo_id.substring(0,6).toUpperCase() : null;
 
     try {
         let resp;
@@ -394,7 +404,8 @@ async function guardarPago(e) {
                 body: JSON.stringify({
                     clasificacion: "Recibido",
                     cliente_id: clienteActualFicha,
-                    trabajo_id: trabajo_id,
+                    // El select vacío da "", que no es un id válido: va null.
+                    trabajo_id: trabajo_id || null,
                     banco: banco,
                     numero: numero,
                     monto: monto,
@@ -410,11 +421,13 @@ async function guardarPago(e) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     cliente_id: clienteActualFicha,
-                    trabajo_id: trabajo_id,
+                    trabajo_id: trabajo_id || null,
                     monto: monto,
                     tipo: "Pago",
                     metodo: metodo,
-                    descripcion: `Pago asociado a trabajo #${shortId}`
+                    descripcion: shortId
+                        ? `Pago asociado a trabajo #${shortId}`
+                        : "Pago a cuenta (sin trabajo imputado)"
                 })
             });
             if (!resp.ok) throw new Error("Fallo al guardar movimiento");
