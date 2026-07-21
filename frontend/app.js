@@ -975,8 +975,8 @@ async function cargarSelectorClientes() {
     cargarSelectoresPapel();
 }
 
-// Puebla los selects de papel (alta y edición de trabajo) con los artículos de
-// stock. El papel es opcional: la primera opción es vacía.
+// Puebla los selects de papel (alta y edición de trabajo, y presupuesto) con
+// los artículos de stock. El papel es opcional: la primera opción es vacía.
 // Sólo listamos artículos en Pliegos: el backend rechaza cualquier otra unidad
 // (no tiene sentido descontarle "3 pliegos" a un bidón de tinta en litros).
 async function cargarSelectoresPapel() {
@@ -984,7 +984,7 @@ async function cargarSelectoresPapel() {
     const papeles = stock.filter(a => a.unidad === 'Pliegos');
     const opciones = '<option value="">Sin papel del stock</option>' +
         papeles.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
-    ['ft_papel_id', 'fe_papel_id'].forEach(id => {
+    ['ft_papel_id', 'fe_papel_id', 'mp_papel_id'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) {
             const actual = sel.value;
@@ -1418,6 +1418,11 @@ async function abrirDrawerPresupuesto() {
         cont.innerHTML += `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${c}" value="0" oninput="calcularModal()" onfocus="if(this.value=='0')this.value=''"></div>`;
     });
 
+    // Con await: editarPresupuesto() y duplicar() llaman a esta función y recién
+    // después asignan mp_papel_id. Si las opciones no estuvieran cargadas
+    // todavía, la asignación no encontraría el <option> y se perdería el papel.
+    await cargarSelectoresPapel();
+
     try {
         const resp = await fetch(`${API_URL}/clientes/`);
         const clientes = await resp.json();
@@ -1486,6 +1491,8 @@ async function duplicarPresupuesto(id) {
         document.getElementById('mp_cantidad').value = p.cantidad;
         document.getElementById('mp_material').value = p.material || '';
         document.getElementById('mp_gramaje').value = p.gramaje || '';
+        document.getElementById('mp_papel_id').value = p.papel_id || '';
+        document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
         document.getElementById('mp_margen').value = p.margen_ganancia;
         document.getElementById('mp_estado').value = "Borrador";
 
@@ -1520,6 +1527,8 @@ async function editarPresupuesto(id) {
         document.getElementById('mp_cantidad').value = p.cantidad;
         document.getElementById('mp_material').value = p.material || '';
         document.getElementById('mp_gramaje').value = p.gramaje || '';
+        document.getElementById('mp_papel_id').value = p.papel_id || '';
+        document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
         document.getElementById('mp_margen').value = p.margen_ganancia;
         document.getElementById('mp_estado').value = p.estado;
 
@@ -1545,6 +1554,22 @@ async function guardarPresupuestoModerno(e) {
 
     const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
 
+    // Papel del stock: los dos campos van juntos o no van. Elegir un papel sin
+    // decir cuántos pliegos no descuenta nada, y poner pliegos sin papel no
+    // tiene a qué aplicarlos.
+    const papelId = document.getElementById('mp_papel_id').value || null;
+    const pliegos = parseFloat(document.getElementById('mp_cantidad_pliegos').value) || null;
+    if (papelId && !pliegos) {
+        Swal.fire('Faltan los pliegos', 'Elegiste un papel del stock: indicá cuántos pliegos consume el trabajo para que la orden pueda descontarlos.', 'warning');
+        restore();
+        return;
+    }
+    if (pliegos && !papelId) {
+        Swal.fire('Falta el papel', 'Cargaste una cantidad de pliegos pero no elegiste de qué papel del stock descontarlos.', 'warning');
+        restore();
+        return;
+    }
+
     try {
         if (idPresupuestoEditando) {
             // Edición: solo mandamos los campos editables, el backend recalcula costo/precio.
@@ -1556,7 +1581,9 @@ async function guardarPresupuestoModerno(e) {
                 gramaje: document.getElementById('mp_gramaje').value || null,
                 detalles_costos: detalles,
                 margen_ganancia: margen,
-                estado: document.getElementById('mp_estado').value
+                estado: document.getElementById('mp_estado').value,
+                papel_id: papelId,
+                cantidad_pliegos: pliegos
             };
             const resp = await fetch(`${API_URL}/presupuestos/${idPresupuestoEditando}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEdicion) });
             if (!resp.ok) {
@@ -1583,7 +1610,9 @@ async function guardarPresupuestoModerno(e) {
                 margen_ganancia: margen,
                 precio_final: 0,
                 estado: document.getElementById('mp_estado').value,
-                fecha_creacion: new Date().toISOString().split('T')[0]
+                fecha_creacion: new Date().toISOString().split('T')[0],
+                papel_id: papelId,
+                cantidad_pliegos: pliegos
             };
             const respNuevo = await fetch(`${API_URL}/presupuestos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!respNuevo.ok) {

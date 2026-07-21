@@ -4,6 +4,7 @@ Cubren el Caso 8 (eliminar un trabajo con cheques asociados) y el Caso 6 (doble
 clic en "Imprimir orden" descontando el stock dos veces).
 """
 import threading
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -78,6 +79,88 @@ class TestEliminarTrabajo:
         r = client.delete(f"/api/trabajos/{trabajo.id}")
         assert r.status_code == 400
         assert "pagos" in r.json()["detail"].lower()
+
+
+# --- Papel y pliegos van juntos ---------------------------------------------
+
+class TestPapelDelTrabajo:
+    """Elegir papel sin decir cuántos pliegos dejaba el trabajo en un estado que
+    no descuenta nada: _descontar_papel saltea el caso y el stock queda
+    desfasado sin dar error. Es el mismo síntoma silencioso del presupuesto
+    convertido, por eso la regla es la misma en los dos lados.
+    """
+
+    def test_rechaza_papel_sin_pliegos_al_crear(self, client, db):
+        cliente = crear_cliente(db)
+        papel = crear_papel(db)
+        r = client.post("/api/trabajos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "precio_venta": 1000, "papel_id": papel.id,
+        })
+        assert r.status_code == 400
+        assert "pliegos" in r.json()["detail"].lower()
+
+    def test_rechaza_pliegos_sin_papel_al_crear(self, client, db):
+        cliente = crear_cliente(db)
+        r = client.post("/api/trabajos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "precio_venta": 1000, "cantidad_pliegos": 100,
+        })
+        assert r.status_code == 400
+        assert "papel" in r.json()["detail"].lower()
+
+    def test_acepta_un_trabajo_sin_papel(self, client, db):
+        # El papel lo trae el cliente o se compra en el momento: los dos campos
+        # en null es un estado válido y frecuente.
+        cliente = crear_cliente(db)
+        r = client.post("/api/trabajos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "precio_venta": 1000,
+        })
+        assert r.status_code == 200
+
+    def test_acepta_papel_con_pliegos(self, client, db):
+        cliente = crear_cliente(db)
+        papel = crear_papel(db)
+        r = client.post("/api/trabajos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "precio_venta": 1000, "papel_id": papel.id, "cantidad_pliegos": 100,
+        })
+        assert r.status_code == 200
+
+    def test_rechaza_papel_sin_pliegos_al_editar(self, client, db):
+        cliente = crear_cliente(db)
+        papel = crear_papel(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"papel_id": papel.id})
+
+        assert r.status_code == 400
+
+    def test_se_puede_sacar_el_papel_de_un_trabajo(self, client, db):
+        # Limpiar los dos campos a la vez tiene que seguir funcionando: es como
+        # se corrige un trabajo al que se le asignó el papel equivocado.
+        cliente = crear_cliente(db)
+        papel = crear_papel(db)
+        trabajo = crear_trabajo(db, cliente, papel_id=papel.id,
+                               cantidad_pliegos=Decimal("100"))
+
+        r = client.put(f"/api/trabajos/{trabajo.id}",
+                       json={"papel_id": None, "cantidad_pliegos": None})
+
+        assert r.status_code == 200
+        db.refresh(trabajo)
+        assert trabajo.papel_id is None
+
+    def test_un_cambio_que_no_toca_el_papel_no_lo_valida(self, client, db):
+        # No-regresión: editar la fecha de entrega de un trabajo sin papel no
+        # debe disparar la validación.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"descripcion_producto": "Otra cosa"})
+
+        assert r.status_code == 200
 
 
 # --- Caso 6: doble clic en imprimir orden -----------------------------------

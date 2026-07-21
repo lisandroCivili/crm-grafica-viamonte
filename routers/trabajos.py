@@ -106,6 +106,32 @@ def _validar_pliegos(cantidad_pliegos) -> None:
         )
 
 
+def _validar_papel(db: Session, papel_id, cantidad_pliegos) -> None:
+    """Valida el papel elegido, si se eligió uno. Compartido con presupuestos.
+
+    Los dos campos van juntos: un papel sin pliegos no descuenta nada (el guard
+    de _descontar_papel lo saltea) y el stock queda desfasado en silencio, que
+    es el mismo síntoma que tenía el presupuesto convertido. Pliegos sin papel
+    no tienen a qué aplicarse.
+
+    Dejar los dos en null sí es válido: significa que el papel lo trae el
+    cliente o se compra en el momento, y entonces no hay nada que descontar.
+    """
+    if papel_id and cantidad_pliegos is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Elegiste un papel del stock: indicá cuántos pliegos consume, si no la orden no puede descontarlo.",
+        )
+    if cantidad_pliegos is not None and not papel_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cargaste una cantidad de pliegos pero no elegiste de qué papel del stock descontarlos.",
+        )
+    if papel_id:
+        _buscar_papel(db, papel_id)
+        _validar_pliegos(cantidad_pliegos)
+
+
 def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str, forzar: bool):
     """Descuenta del stock el papel que consume la orden y lo deja en el historial.
 
@@ -179,9 +205,7 @@ def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db))
     if not db_cliente:
         raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
 
-    if trabajo.papel_id:
-        _buscar_papel(db, trabajo.papel_id)
-        _validar_pliegos(trabajo.cantidad_pliegos)
+    _validar_papel(db, trabajo.papel_id, trabajo.cantidad_pliegos)
 
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
@@ -247,10 +271,11 @@ def actualizar_trabajo(
     # artículo inexistente o con la unidad equivocada. Validamos contra el valor
     # efectivo (lo que viene en el update, o lo que ya tenía el trabajo).
     if "papel_id" in update_data or "cantidad_pliegos" in update_data:
-        papel_id = update_data.get("papel_id", db_trabajo.papel_id)
-        if papel_id:
-            _buscar_papel(db, papel_id)
-            _validar_pliegos(update_data.get("cantidad_pliegos", db_trabajo.cantidad_pliegos))
+        _validar_papel(
+            db,
+            update_data.get("papel_id", db_trabajo.papel_id),
+            update_data.get("cantidad_pliegos", db_trabajo.cantidad_pliegos),
+        )
 
     for key, value in update_data.items():
         setattr(db_trabajo, key, value)

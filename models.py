@@ -140,6 +140,16 @@ class Presupuesto(Base):
     convertido_a_trabajo = Column(Boolean, default=False)
     fecha_creacion = Column(Date, nullable=False)
 
+    # El papel se guarda dos veces, mismo criterio que en Trabajo:
+    # - material/gramaje (arriba) son texto libre y es lo que se lee en el
+    #   presupuesto impreso.
+    # - papel_id es opcional y sólo existe para saber QUÉ descontar del stock.
+    # Sin estos dos campos el trabajo convertido nacía sin papel y su orden de
+    # producción nunca descontaba nada: el camino más usado del taller dejaba
+    # el stock desfasado sin dar ningún error.
+    papel_id = Column(String, ForeignKey("stock.id"), nullable=True)
+    cantidad_pliegos = Column(Cantidad, nullable=True)
+
     cliente = relationship("Cliente")
 
 class Gasto(Base):

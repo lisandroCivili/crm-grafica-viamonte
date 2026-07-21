@@ -223,6 +223,14 @@ def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
     if lo_usa_un_trabajo:
         raise HTTPException(status_code=400, detail="No se puede eliminar: hay trabajos que usan este artículo como papel.")
 
+    # Los presupuestos también apuntan al papel por FK desde que lo heredan al
+    # convertirse. Sin este chequeo el DELETE pasaba y la conversión posterior
+    # moría por IntegrityError, el mismo 500 opaco que daba borrar un trabajo
+    # con cheques.
+    lo_usa_un_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.papel_id == articulo_id).first()
+    if lo_usa_un_presupuesto:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: hay presupuestos que usan este artículo como papel.")
+
     # El historial de ajustes pertenece al artículo: se borra junto con él.
     db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).delete()
     db.delete(db_art)

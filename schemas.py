@@ -219,6 +219,10 @@ class PresupuestoBase(BaseModel):
     estado: Optional[str] = "Borrador"
     convertido_a_trabajo: Optional[bool] = False
     fecha_creacion: date
+    # Papel del stock que va a consumir el trabajo. Opcional: lo puede traer el
+    # cliente o comprarse en el momento. El trabajo lo hereda al convertirse.
+    papel_id: Optional[str] = None
+    cantidad_pliegos: Optional[Decimal] = None
 
     _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
     _margen_valido = field_validator("margen_ganancia")(_validar_margen)
@@ -267,6 +271,8 @@ class PresupuestoUpdate(BaseModel):
     detalles_costos: Optional[dict] = None
     margen_ganancia: Optional[Decimal] = None
     estado: Optional[str] = None
+    papel_id: Optional[str] = None
+    cantidad_pliegos: Optional[Decimal] = None
 
     _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
     _margen_valido = field_validator("margen_ganancia")(_validar_margen)

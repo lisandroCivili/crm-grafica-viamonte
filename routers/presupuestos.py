@@ -6,6 +6,13 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from calculos import sumar_detalles_costos, calcular_precio_presupuesto, calcular_saldo_trabajo
+# El papel del presupuesto se valida con las mismas reglas que el del trabajo
+# (que exista, que se mida en pliegos, que la cantidad sea un entero positivo y
+# que papel y pliegos vayan juntos). Se importa en vez de duplicarla para que no
+# puedan divergir: el presupuesto le pasa el papel al trabajo al convertirse, así
+# que si las reglas difirieran, un presupuesto válido podría producir un trabajo
+# inválido.
+from routers.trabajos import _validar_papel
 
 router = APIRouter(prefix="/api/presupuestos", tags=["Presupuestos"])
 
@@ -46,6 +53,8 @@ def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depe
             raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
 
     datos = presupuesto.model_dump()
+
+    _validar_papel(db, presupuesto.papel_id, presupuesto.cantidad_pliegos)
 
     # Asociación a un trabajo existente sin presupuesto: recién con esto el
     # trabajo aporta ganancia al dashboard.
@@ -176,6 +185,15 @@ def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.Pres
         if not db_cliente:
             raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
 
+    # Se valida contra el valor efectivo: lo que viene en el update, o lo que ya
+    # tenía el presupuesto. Mismo criterio que el PUT de trabajos.
+    if "papel_id" in update_data or "cantidad_pliegos" in update_data:
+        _validar_papel(
+            db,
+            update_data.get("papel_id", db_presupuesto.papel_id),
+            update_data.get("cantidad_pliegos", db_presupuesto.cantidad_pliegos),
+        )
+
     for key, value in update_data.items():
         setattr(db_presupuesto, key, value)
 
@@ -235,6 +253,13 @@ def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
         notas_iniciales=f"Viene del presupuesto {db_presupuesto.numero_secuencia or 's/n'}",
         fecha_creacion=date.today(),
         estado="Aprobado",
+        # El papel viaja con el trabajo: sin esto la orden de producción nunca
+        # descontaba stock, que era el agujero del camino más usado del taller.
+        # papel_tipo (texto de la boleta) sale de material, que es lo mismo que
+        # se lee en el presupuesto.
+        papel_id=db_presupuesto.papel_id,
+        cantidad_pliegos=db_presupuesto.cantidad_pliegos,
+        papel_tipo=db_presupuesto.material,
     )
     db.add(nuevo_trabajo)
     db.flush()  # Asigna el id del trabajo sin commitear todavía.
