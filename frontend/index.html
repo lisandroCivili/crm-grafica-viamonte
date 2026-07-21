@@ -121,6 +121,10 @@
         <div style="background: #fff; padding: 24px 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02); min-width: 180px;">
           <div style="font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;">Ingresos (Cobrado)</div>
           <div id="kpi-ingresos" style="font-size: 26px; font-weight: bold; color: var(--green); margin-top: 8px;">$ 0</div>
+          <!-- Los ingresos sin imputar ya están sumados en el monto de arriba, por eso
+               van como nota y no como tarjeta aparte: una tarjeta se leería como plata
+               adicional y haría contar la misma cobranza dos veces. -->
+          <div id="kpi-ingresos-nota" style="font-size: 11px; color: var(--muted); margin-top: 4px;"></div>
         </div>
 
         <div style="background: #fff; padding: 24px 20px; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 4px 6px rgba(0,0,0,0.02); min-width: 180px;">
@@ -550,6 +554,9 @@
       <div class="kpi" style="margin-bottom: 24px; text-align:center;">
         <div class="label">Saldo de Cuenta Corriente</div>
         <div class="value" id="ficha-saldo" style="color:var(--green); font-size: 28px;">$0.00</div>
+        <!-- Sólo se completa cuando el saldo está a favor del cliente: sin esto,
+             el monto en verde no se distingue de una cuenta al día. -->
+        <div id="ficha-saldo-aclaracion" style="font-size: 12px; color: var(--green); font-weight: 600;"></div>
       </div>
 
       <!-- PESTAÑAS (TABS) -->
@@ -720,11 +727,12 @@
 
         <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
           <label style="margin-bottom: 5px;">Papel (del stock, para descontar)</label>
-          <select id="fe_papel_id" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"></select>
+          <select id="fe_papel_id" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"
+                  onchange="sincronizarPliegosConPapel('fe_papel_id', 'fe_cantidad_pliegos')"></select>
         </div>
         <div class="form-group">
           <label>Cantidad de pliegos</label>
-          <input type="number" step="1" min="1" id="fe_cantidad_pliegos" />
+          <input type="number" step="1" min="1" id="fe_cantidad_pliegos" disabled />
         </div>
         <div class="form-group">
           <label>Papel (texto boleta)</label>
@@ -823,11 +831,12 @@
 
           <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
             <label style="margin-bottom: 5px;">Papel (del stock, para descontar)</label>
-            <select id="ft_papel_id" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"></select>
+            <select id="ft_papel_id" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"
+                    onchange="sincronizarPliegosConPapel('ft_papel_id', 'ft_cantidad_pliegos')"></select>
           </div>
           <div class="form-group">
             <label>Cantidad de pliegos</label>
-            <input type="number" step="1" min="1" id="ft_cantidad_pliegos" />
+            <input type="number" step="1" min="1" id="ft_cantidad_pliegos" disabled />
           </div>
           <div class="form-group">
             <label>Papel (texto boleta)</label>
@@ -975,13 +984,14 @@
                 <div style="display:flex; gap:15px; margin-bottom: 15px;">
                     <div style="flex:2;">
                         <label style="font-size:12px; color:var(--muted);">Papel del stock (opcional, para descontar)</label>
-                        <select id="mp_papel_id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+                        <select id="mp_papel_id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"
+                                onchange="sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos')">
                             <option value="">Sin papel del stock</option>
                         </select>
                     </div>
                     <div style="flex:1;">
                         <label style="font-size:12px; color:var(--muted);">Pliegos a consumir</label>
-                        <input type="number" id="mp_cantidad_pliegos" step="1" min="1" placeholder="Ej: 500" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+                        <input type="number" id="mp_cantidad_pliegos" step="1" min="1" placeholder="Ej: 500" disabled style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
                     </div>
                 </div>
 

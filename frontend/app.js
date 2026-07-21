@@ -17,6 +17,23 @@ function fmtMoney(valor) {
 }
 
 // ==========================================
+// HELPER: CÓMO SE MUESTRA UN SALDO DE CUENTA CORRIENTE
+// ==========================================
+// Un saldo negativo NO es deuda negativa: es plata que el cliente tiene a favor
+// (la seña de un trabajo que después se canceló, un pago de más). Mostrarlo como
+// "-$ 5.000" en una columna que dice "Saldo" se lee como un error de cálculo, así
+// que se muestra el valor absoluto y se nombra qué es. Vive acá porque el saldo se
+// pinta en la tabla de clientes y en la ficha, y la regla tiene que ser una sola.
+function saldoMostrable(saldo) {
+    const n = Number(saldo) || 0;
+    return {
+        monto: `$ ${fmtMoney(Math.abs(n))}`,
+        color: n > 0 ? "var(--red)" : "var(--green)",
+        aclaracion: n < 0 ? "Saldo a favor" : "",
+    };
+}
+
+// ==========================================
 // HELPER: ESCAPE DE TEXTO PARA innerHTML
 // ==========================================
 // Todo el render arma HTML por interpolación. Un cliente "O'Brien" o una
@@ -237,9 +254,11 @@ async function abrirFicha(id) {
         // El saldo lo calcula el backend (Decimal) para no re-acumular error de float en el browser.
         const saldoReal = saldoInfo ? Number(saldoInfo.saldo) : 0;
 
+        const vistaSaldo = saldoMostrable(saldoReal);
         const lblSaldo = document.getElementById('ficha-saldo');
-        lblSaldo.innerText = `$ ${fmtMoney(saldoReal)}`;
-        lblSaldo.style.color = saldoReal > 0 ? "var(--red)" : "var(--green)";
+        lblSaldo.innerText = vistaSaldo.monto;
+        lblSaldo.style.color = vistaSaldo.color;
+        document.getElementById('ficha-saldo-aclaracion').innerText = vistaSaldo.aclaracion;
 
         const divTrabajos = document.getElementById('lista-trabajos-cliente');
         divTrabajos.innerHTML = trabajos.length === 0 ? '<p style="text-align:center; color:var(--muted);">Sin historial de trabajos.</p>' : '';
@@ -617,6 +636,10 @@ async function abrirModalEditarTrabajo(id) {
     document.getElementById('fe_cantidad_pliegos').disabled = bloqueado;
     document.getElementById('fe_aviso_impresa').style.display = bloqueado ? 'block' : 'none';
 
+    // Va después del bloqueo por orden impresa: si la orden ya salió, el selector
+    // queda deshabilitado y la función no toca nada.
+    sincronizarPliegosConPapel('fe_papel_id', 'fe_cantidad_pliegos');
+
     toggleDrawer('drawer-editar-trabajo');
 }
 
@@ -747,15 +770,17 @@ async function cargarClientes(filtro = "") {
 
         tbody.innerHTML = '';
         clientes.forEach(cliente => {
-            const saldoReal = saldoPorCliente[cliente.id] ?? 0;
-            const colorSaldo = saldoReal > 0 ? "var(--red)" : "var(--green)";
+            const vistaSaldo = saldoMostrable(saldoPorCliente[cliente.id] ?? 0);
 
             tbody.innerHTML += `
                 <tr class="client-row">
                   <td><b>${esc(cliente.nombre_completo)}</b></td>
                   <td>${cliente.nombre_empresa || '-'}</td>
                   <td class="tnum">${cliente.dni_cuit}</td>
-                  <td class="tnum" style="color: ${colorSaldo}; font-weight: 600;">$ ${fmtMoney(saldoReal)}</td>
+                  <td class="tnum" style="color: ${vistaSaldo.color}; font-weight: 600;">
+                    ${vistaSaldo.monto}
+                    ${vistaSaldo.aclaracion ? `<div style="font-size:11px; font-weight:500;">${vistaSaldo.aclaracion}</div>` : ''}
+                  </td>
                   <td>
                     <button class="btn secondary" style="font-size:12px; padding:6px 12px;" onclick="abrirFicha('${cliente.id}')">Ver Ficha</button>
                     <button class="btn" style="background:#25D366; padding:6px; margin-left:4px;" onclick="abrirWhatsApp('${cliente.telefono}')">WA</button>
@@ -951,6 +976,10 @@ async function guardarTrabajo(e) {
         }
 
         document.getElementById('form-trabajo').reset();
+        // reset() limpia los valores pero no el estado deshabilitado: si el trabajo
+        // que se acaba de guardar tenía papel, el campo de pliegos quedaría activo
+        // y vacío para el siguiente.
+        sincronizarPliegosConPapel('ft_papel_id', 'ft_cantidad_pliegos');
         toggleDrawer('drawer-nuevo-trabajo');
         cargarTrabajos();
 
@@ -990,8 +1019,31 @@ async function cargarSelectoresPapel() {
             const actual = sel.value;
             sel.innerHTML = opciones;
             sel.value = actual; // conservamos la selección si ya había una
+            // Repintar el select puede dejarlo sin selección (si ese papel se
+            // agotó o se borró del stock, la opción ya no existe). El campo de
+            // pliegos tiene que seguir a ese cambio, que no dispara onchange.
+            sincronizarPliegosConPapel(id, id.replace('_papel_id', '_cantidad_pliegos'));
         }
     });
+}
+
+// Los pliegos sólo tienen sentido con un papel del stock elegido: sin papel no hay
+// de dónde descontarlos, y el backend rechaza el par incompleto con un 400. En vez
+// de que el operador se entere recién al guardar, el campo se deshabilita y se
+// limpia mientras no haya papel. Hay que llamarla al abrir cada formulario (para
+// fijar el estado inicial) además de en el onchange del selector.
+function sincronizarPliegosConPapel(idSelect, idPliegos) {
+    const sel = document.getElementById(idSelect);
+    const input = document.getElementById(idPliegos);
+    if (!sel || !input) return;
+
+    // Con la orden ya impresa los dos campos quedan congelados desde afuera
+    // (descontaron stock): no hay que reactivar el de pliegos.
+    if (sel.disabled) return;
+
+    const hayPapel = !!sel.value;
+    input.disabled = !hayPapel;
+    if (!hayPapel) input.value = '';
 }
 
 function permitirSoltar(ev) { ev.preventDefault(); }
@@ -1493,6 +1545,9 @@ async function duplicarPresupuesto(id) {
         document.getElementById('mp_gramaje').value = p.gramaje || '';
         document.getElementById('mp_papel_id').value = p.papel_id || '';
         document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
+        // Después de asignar los dos, no antes: el campo arranca deshabilitado y
+        // hay que habilitarlo si el presupuesto ya traía un papel elegido.
+        sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos');
         document.getElementById('mp_margen').value = p.margen_ganancia;
         document.getElementById('mp_estado').value = "Borrador";
 
@@ -1529,6 +1584,9 @@ async function editarPresupuesto(id) {
         document.getElementById('mp_gramaje').value = p.gramaje || '';
         document.getElementById('mp_papel_id').value = p.papel_id || '';
         document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
+        // Después de asignar los dos, no antes: el campo arranca deshabilitado y
+        // hay que habilitarlo si el presupuesto ya traía un papel elegido.
+        sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos');
         document.getElementById('mp_margen').value = p.margen_ganancia;
         document.getElementById('mp_estado').value = p.estado;
 
@@ -2965,6 +3023,7 @@ async function cargarDashboard() {
             });
             document.getElementById('kpi-ganancia').style.color = 'var(--muted)';
             document.getElementById('kpi-ganancia-nota').innerText = '';
+            document.getElementById('kpi-ingresos-nota').innerText = '';
             document.getElementById('lista-morosos').innerHTML =
                 '<div style="color:var(--muted); margin-top:10px;">No se pudo calcular la deuda de clientes.</div>';
         } else {
@@ -2976,6 +3035,16 @@ async function cargarDashboard() {
             // Parte de los egresos que no restó de la ganancia por estar ya contemplada
             // en el margen de un presupuesto. Explica por qué ganancia ≠ ingresos − egresos.
             const costosPresupuestados = Number(kpis.costos_presupuestados || 0);
+
+            // Parte de lo cobrado que no está imputada a ningún trabajo (un pago a
+            // cuenta, un cheque suelto). Es plata real, pero no aporta ganancia: sin
+            // trabajo no hay presupuesto del cual sacar el costo. Se muestra para que
+            // se pueda imputar después, en vez de quedar escondida en la diferencia
+            // entre ingresos y ganancia.
+            const sinImputar = Number(kpis.ingresos_sin_imputar || 0);
+            document.getElementById('kpi-ingresos-nota').innerText = sinImputar > 0
+                ? `Incluye $ ${fmtMoney(sinImputar)} sin imputar a un trabajo`
+                : '';
 
             document.getElementById('kpi-ingresos').innerText = `$ ${fmtMoney(ingresosReales)}`;
             document.getElementById('kpi-egresos').innerText = `$ ${fmtMoney(egresosPeriodo)}`;
