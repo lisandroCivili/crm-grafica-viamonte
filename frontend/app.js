@@ -1924,56 +1924,70 @@ async function generarPDFCliente(presupuesto_id) {
     const precioUnitario = p.cantidad ? Number(p.precio_final) / p.cantidad : Number(p.precio_final);
 
     const div = document.createElement('div');
-    div.style.padding = '40px';
     div.style.fontFamily = 'Arial, sans-serif';
-    div.style.color = '#222';
+    div.style.color = '#000';
+    div.style.width = '794px';
     div.innerHTML = `
-        <div style="text-align:center; border-bottom:3px solid #D5006D; padding-bottom:12px; margin-bottom:10px;">
-            <div style="font-size:26px; font-weight:bold; letter-spacing:1px; color:#D5006D;">GRÁFICA VIAMONTE</div>
-            <div style="font-size:20px; font-weight:bold; letter-spacing:3px; margin-top:4px;">PRESUPUESTO</div>
-        </div>
-        <p style="margin:4px 0; font-size:13px;">Fecha de emisión: ${fecha} - S.M. de Tucumán.</p>
-        <p style="margin:4px 0 20px; font-size:13px;"><b>Cliente:</b> ${nombreCliente}</p>
-
-        <table style="width:100%; border-collapse:collapse; font-size:13px;">
-            <thead>
-                <tr style="background:#f4f4f4;">
-                    <th style="border:1px solid #ccc; padding:8px; text-align:left;">Producto</th>
-                    <th style="border:1px solid #ccc; padding:8px; text-align:center; width:70px;">Cantidad</th>
-                    <th style="border:1px solid #ccc; padding:8px; text-align:right; width:110px;">Precio Unitario</th>
-                    <th style="border:1px solid #ccc; padding:8px; text-align:right; width:110px;">Precio Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td style="border:1px solid #ccc; padding:8px; word-break:break-word; white-space:pre-wrap;">${p.descripcion}</td>
-                    <td style="border:1px solid #ccc; padding:8px; text-align:center;">${p.cantidad}</td>
-                    <td style="border:1px solid #ccc; padding:8px; text-align:right;">$ ${fmtMoney(precioUnitario)}</td>
-                    <td style="border:1px solid #ccc; padding:8px; text-align:right;">$ ${fmtMoney(p.precio_final)}</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div style="text-align:right; margin-top:12px; font-size:16px; font-weight:bold; color:#D5006D;">
-            TOTAL: $ ${fmtMoney(p.precio_final)}
+        <!-- HEADER: barra negra ancho completo + cola triangular a la izq (medido del PDF real) -->
+        <div style="position:relative; width:100%; height:179px; background:#111;
+                    clip-path:polygon(0 0, 100% 0, 100% 70%, 44.5% 70%, 38.4% 100%, 0 100%);">
+            <img src="assets/logo-presupuesto-cl.png"
+                 style="position:absolute; top:18px; left:40px; height:95px;">
+            <span style="position:absolute; top:48px; right:40px;
+                         font-size:34px; font-weight:800; color:#fff; letter-spacing:1px;">PRESUPUESTO</span>
         </div>
 
-        <div style="margin-top:80px; display:flex; justify-content:space-between; align-items:flex-end;">
-            <div style="font-size:12px; color:#666;">Válido por 15 días</div>
-            <div style="text-align:center;">
-                <div style="border-top:1px solid #333; width:220px; margin-bottom:4px;"></div>
-                <div style="font-size:12px; color:#666;">Firma</div>
+        <div style="padding:0 40px;">
+            <div style="text-align:left; margin-top:20px; font-size:13px;">
+                <p style="margin:4px 0;">Fecha de emisión: ${fecha} - S.M. de Tucumán.</p>
+                <p style="margin:4px 0;">Cliente: ${nombreCliente}</p>
+            </div>
+
+            <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:13px;">
+                <thead>
+                    <tr>
+                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:left;">Producto</th>
+                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:center; width:90px;">Cantidad</th>
+                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:right; width:110px;">Precio Unitario</th>
+                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:right; width:110px;">Precio Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="border:1px solid #ccc; padding:10px; word-break:break-word; white-space:pre-wrap;">${p.descripcion}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:center;">${p.cantidad}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:right;">${fmtMoney(precioUnitario)}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:right; font-weight:bold;">${fmtMoney(p.precio_final)}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="display:flex; justify-content:flex-end; margin-top:15px;">
+                <div style="border:2px solid #111; padding:10px 18px;">
+                    <span style="font-size:18px; font-weight:bold;">TOTAL: $ ${fmtMoney(p.precio_final)}</span>
+                </div>
+            </div>
+
+            <div style="text-align:center; margin-top:80px;">
+                <img src="assets/firma-facu.png" style="height:90px;">
+                <p style="margin:4px 0; font-weight:bold; font-size:13px;">Grafica Viamonte</p>
+                <p style="margin:2px 0; font-size:12px;">de Soria Daniel Enrique</p>
             </div>
         </div>
 
-        <div style="margin-top:60px; border-top:1px solid #ddd; padding-top:10px; text-align:center; font-size:11px; color:#777;">
-            <div>Grafica Viamonte de Soria Daniel Enrique</div>
-            <div>igv.srl@hotmail.com | WhatsApp: +54 381 239-4798</div>
+        <div style="text-align:center; margin-top:30px; font-size:11px; color:#555;">
+            igv.srl@hotmail.com &nbsp;|&nbsp; WhatsApp: +54 381 239-4798
         </div>
     `;
 
     const nombreArchivo = `Presupuesto_${sanitizarNombreArchivo(nombreCliente)}_${fmtFechaArchivo(p.fecha_creacion)}.pdf`;
-    html2pdf().set({ margin: 10, filename: nombreArchivo }).from(div).save();
+    document.body.appendChild(div);
+
+    const imgs = Array.from(div.querySelectorAll('img'));
+    await Promise.all(imgs.map(img => img.complete ? Promise.resolve() :
+        new Promise(res => { img.onload = res; img.onerror = res; })));
+
+    html2pdf().set({ margin: 0, filename: nombreArchivo }).from(div).save().then(() => div.remove());
 }
 
 // 2. PDF INTERNO (Detalle de todos los costos e ítems del formulario)
