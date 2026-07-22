@@ -1832,7 +1832,7 @@ async function convertirATrabajo(presupuesto_id, button) {
         } else if (!p.version_de) {
             const confirmacion = await Swal.fire({
                 title: '¿Pasar a Trabajo?',
-                text: "Esto enviará el presupuesto al Kanban de producción.",
+                text: "Esto enviará el presupuesto al Dashboard de producción.",
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#D5006D',
@@ -1865,7 +1865,7 @@ async function convertirATrabajo(presupuesto_id, button) {
                 if (!respCancel.ok) throw new Error('respuesta no OK');
             } catch (e) {
                 console.error('Error al cancelar el trabajo anterior:', e);
-                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo con el botón ✖ de su tarjeta en el Kanban.';
+                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo con el botón ✖ de su tarjeta en el Dashboard de trabajo.';
             }
             // (Se eliminó el Movimiento monto:0 de "cancelado por corrección": no es plata real.)
         }
