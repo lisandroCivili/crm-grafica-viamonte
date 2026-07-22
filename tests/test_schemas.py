@@ -32,37 +32,42 @@ def cheque_valido(**overrides):
 
 class TestDetallesCostosEnSchema:
     """El dict de costos sólo acepta números: antes un texto llegaba hasta
-    sumar_detalles_costos y reventaba con un 500."""
+    sumar_detalles_costos y reventaba con un 500. Ahora los costos viven en cada
+    ítem del presupuesto (ItemPresupuesto)."""
+
+    def _item(self, **overrides):
+        datos = dict(descripcion="Volantes", cantidad=100, precio_unitario=Decimal("10"))
+        datos.update(overrides)
+        return datos
 
     @pytest.mark.parametrize("valor", [1000, "250.50", 0.1])
     def test_acepta_valores_numericos_sin_convertirlos(self, valor):
         # El dict va a una columna JSON: si el validator convirtiera a Decimal,
         # json.dumps reventaría al persistir. Valida, no transforma.
-        p = schemas.PresupuestoUpdate(detalles_costos={"papel": valor})
-        assert p.detalles_costos["papel"] == valor
-        assert type(p.detalles_costos["papel"]) is type(valor)
+        item = schemas.ItemPresupuestoCreate(**self._item(detalles_costos={"papel": valor}))
+        assert item.detalles_costos["papel"] == valor
+        assert type(item.detalles_costos["papel"]) is type(valor)
 
     @pytest.mark.parametrize("basura", ["", "abc", "1,50", [], {}])
     def test_rechaza_valores_no_numericos(self, basura):
         with pytest.raises(ValidationError):
-            schemas.PresupuestoUpdate(detalles_costos={"papel": basura})
+            schemas.ItemPresupuestoCreate(**self._item(detalles_costos={"papel": basura}))
 
     def test_el_error_nombra_el_costo_culpable(self):
         with pytest.raises(ValidationError, match="tinta"):
-            schemas.PresupuestoUpdate(detalles_costos={"papel": 100, "tinta": "abc"})
+            schemas.ItemPresupuestoCreate(**self._item(detalles_costos={"papel": 100, "tinta": "abc"}))
 
     def test_acepta_null_como_costo_no_cargado(self):
         # calculos.py ya trata None como "no cargado" y lo saltea: rechazarlo
         # rompería compatibilidad con lo que hoy funciona.
-        p = schemas.PresupuestoUpdate(detalles_costos={"papel": None})
-        assert p.detalles_costos == {"papel": None}
+        item = schemas.ItemPresupuestoCreate(**self._item(detalles_costos={"papel": None}))
+        assert item.detalles_costos == {"papel": None}
 
-    def test_tambien_valida_al_crear(self):
+    def test_tambien_valida_al_crear_el_presupuesto(self):
         with pytest.raises(ValidationError):
             schemas.PresupuestoCreate(
-                descripcion="Volantes", cantidad=100,
-                margen_ganancia=Decimal("50"), fecha_creacion=date(2026, 7, 1),
-                detalles_costos={"papel": ""},
+                fecha_creacion=date(2026, 7, 1),
+                items=[self._item(detalles_costos={"papel": ""})],
             )
 
 

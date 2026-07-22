@@ -946,93 +946,45 @@
             </div>
             
             <form id="form-presupuesto" onsubmit="guardarPresupuestoModerno(event)">
+                <!-- Cabecera del presupuesto: datos comunes a todos los ítems. -->
                 <div style="display:flex; gap:15px; margin-bottom: 15px;">
-                    <div style="flex:1;">
-                        <label style="font-size:12px; color:var(--muted);">Producto</label>
-                        <input type="text" id="mp_descripcion" placeholder="Ej: Bolsas de papel" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
-                    </div>
                     <div style="flex:1;">
                         <label style="font-size:12px; color:var(--muted);">Cliente (Empresa)</label>
                         <select id="mp_cliente_id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"></select>
                     </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px; color:var(--muted);">Estado</label>
+                        <select id="mp_estado" style="width:100%; padding:10px; border:2px solid var(--magenta); border-radius:6px; font-weight:bold; color:var(--magenta);">
+                            <option value="Borrador">Borrador</option>
+                            <option value="Enviado">Enviado</option>
+                            <option value="Aprobado">Aprobado</option>
+                            <option value="Rechazado">Rechazado</option>
+                        </select>
+                    </div>
                 </div>
 
                 <!-- Asociar a un trabajo ya creado que no tenga presupuesto: recién
-                     con esta asociación el trabajo aporta ganancia al dashboard. -->
+                     con esta asociación el trabajo aporta ganancia al dashboard.
+                     Sólo válido con un único ítem. -->
                 <div id="mp-asociar-trabajo-row" style="margin-bottom: 15px;">
-                    <label style="font-size:12px; color:var(--muted);">Asociar a trabajo existente sin presupuesto (opcional)</label>
+                    <label style="font-size:12px; color:var(--muted);">Asociar a trabajo existente sin presupuesto (opcional, sólo con un ítem)</label>
                     <select id="mp_trabajo_id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
                         <option value="">No asociar</option>
                     </select>
                 </div>
 
-                <div style="display:flex; gap:15px; margin-bottom: 15px;">
-                    <div style="flex:1;">
-                        <label style="font-size:12px; color:var(--muted);">Material / Tipo de papel</label>
-                        <input type="text" id="mp_material" placeholder="Ej: Ilustración" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
-                    </div>
-                    <div style="flex:1;">
-                        <label style="font-size:12px; color:var(--muted);">Gramaje (g/m²)</label>
-                        <input type="text" id="mp_gramaje" placeholder="Ej: 300" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
-                    </div>
+                <!-- Ítems del presupuesto: uno o varios productos. Se inyectan por
+                     JS como tarjetas (ver renderItemPresupuesto en app.js). -->
+                <p style="font-size:12px; color:var(--muted); margin-bottom:10px; font-weight:bold;">Productos del presupuesto</p>
+                <div id="contenedor-items" style="display:flex; flex-direction:column; gap:15px; margin-bottom: 15px;">
+                    <!-- tarjetas de ítem -->
                 </div>
+                <button type="button" class="btn secondary" onclick="agregarItemPresupuesto()" style="width:100%; margin-bottom: 20px;">+ Agregar producto</button>
 
-                <!-- Papel del stock: es lo que permite que la orden de producción
-                     del trabajo convertido descuente pliegos. Los campos de arriba
-                     (material/gramaje) son el texto que se lee en el presupuesto;
-                     esto identifica el artículo real. -->
-                <div style="display:flex; gap:15px; margin-bottom: 15px;">
-                    <div style="flex:2;">
-                        <label style="font-size:12px; color:var(--muted);">Papel del stock (opcional, para descontar)</label>
-                        <select id="mp_papel_id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"
-                                onchange="sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos')">
-                            <option value="">Sin papel del stock</option>
-                        </select>
-                    </div>
-                    <div style="flex:1;">
-                        <label style="font-size:12px; color:var(--muted);">Pliegos a consumir</label>
-                        <input type="number" id="mp_cantidad_pliegos" step="1" min="1" placeholder="Ej: 500" disabled style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 20px;">
-                    <label style="font-size:12px; color:var(--muted);">Cantidad</label>
-                    <input type="number" id="mp_cantidad" value="1" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
-                </div>
-
-                <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">Costos (dejá vacío lo que no aplique)</p>
-                <div id="contenedor-costos" style="display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom: 20px;">
-                    <!-- Se inyectan los inputs de costos por JS -->
-                </div>
-
-                <div style="margin-bottom: 15px;">
-                    <label style="font-size:12px; color:var(--muted);">% de ganancia</label>
-                    <input type="number" id="mp_margen" placeholder="Ej: 35" value="100" required style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;" oninput="calcularModal()">
-                </div>
-
-                <div style="margin-bottom: 25px;">
-                    <label style="font-size:12px; color:var(--muted);">Estado</label>
-                    <select id="mp_estado" style="width:100%; padding:10px; border:2px solid var(--magenta); border-radius:6px; font-weight:bold; color:var(--magenta);">
-                        <option value="Borrador">Borrador</option>
-                        <option value="Enviado">Enviado</option>
-                        <option value="Aprobado">Aprobado</option>
-                        <option value="Rechazado">Rechazado</option>
-                    </select>
-                </div>
-
-                <!-- Resumen Fijo -->
+                <!-- Resumen: total del presupuesto = suma de los ítems. -->
                 <div style="background: var(--magenta-soft); padding: 15px; border-radius: 8px;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:14px; color:var(--ink);">
-                        <span>Sub total</span> <span id="lbl-m-subtotal">$0</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:14px; color:var(--ink);">
-                        <span id="lbl-m-txt-ganancia">0% de ganancia</span> <span id="lbl-m-ganancia">$0</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:16px; font-weight:bold; color:var(--magenta);">
-                        <span>Precio Total Trabajo</span> <span id="lbl-m-total">$0</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; font-size:14px; color:var(--magenta);">
-                        <span>Precio por unidad</span> <span id="lbl-m-unidad">$0</span>
+                    <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:bold; color:var(--magenta);">
+                        <span>Precio Total Presupuesto</span> <span id="lbl-m-total">$0</span>
                     </div>
                 </div>
 

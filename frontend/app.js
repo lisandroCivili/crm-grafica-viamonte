@@ -1004,16 +1004,17 @@ async function cargarSelectorClientes() {
     cargarSelectoresPapel();
 }
 
-// Puebla los selects de papel (alta y edición de trabajo, y presupuesto) con
-// los artículos de stock. El papel es opcional: la primera opción es vacía.
-// Sólo listamos artículos en Pliegos: el backend rechaza cualquier otra unidad
-// (no tiene sentido descontarle "3 pliegos" a un bidón de tinta en litros).
+// Puebla los selects de papel (alta y edición de trabajo) con los artículos de
+// stock. El papel es opcional: la primera opción es vacía. Sólo listamos
+// artículos en Pliegos: el backend rechaza cualquier otra unidad (no tiene
+// sentido descontarle "3 pliegos" a un bidón de tinta en litros). El presupuesto
+// tiene su propio poblado por tarjeta de ítem (ver cargarSelectorPapelItem).
 async function cargarSelectoresPapel() {
     const stock = await (await fetch(`${API_URL}/stock/`)).json();
     const papeles = stock.filter(a => a.unidad === 'Pliegos');
     const opciones = '<option value="">Sin papel del stock</option>' +
         papeles.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
-    ['ft_papel_id', 'fe_papel_id', 'mp_papel_id'].forEach(id => {
+    ['ft_papel_id', 'fe_papel_id'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) {
             const actual = sel.value;
@@ -1259,9 +1260,10 @@ async function cargarTrabajos() {
     ]);
 
     // Trabajos que ya tienen presupuesto asociado: los demás no aportan ganancia
-    // y se marcan en el tablero para que el usuario lo sepa.
+    // y se marcan en el tablero para que el usuario lo sepa. El vínculo vive en
+    // cada ítem del presupuesto (un presupuesto puede generar varios trabajos).
     const trabajosConPresupuesto = new Set(
-        presupuestos.filter(p => p.trabajo_id).map(p => p.trabajo_id)
+        presupuestos.flatMap(p => (p.items || []).map(it => it.trabajo_id)).filter(Boolean)
     );
 
     const cols = {
@@ -1453,9 +1455,146 @@ const LISTA_COSTOS = ["Papel", "Troquel", "Luz", "Diseño", "Chapas", "Impresió
 let idPresupuestoVersionDe = null; // Para saber si estamos duplicando uno viejo
 let idPresupuestoEditando = null; // Para saber si estamos editando un presupuesto existente (en vez de crear uno nuevo)
 
+// Contador para IDs únicos de los selects de papel de cada tarjeta de ítem
+// (cargarSelectoresPapel/sincronizarPliegosConPapel trabajan por id).
+let _itemSeq = 0;
+
+// HTML de una tarjeta de ítem del presupuesto. datos precarga los valores (al
+// editar/duplicar); vacío para un ítem nuevo. Cada tarjeta es autocontenida: sus
+// inputs se recolectan con querySelectorAll('.item-*') dentro de la tarjeta.
+function renderItemPresupuesto(datos = {}) {
+    const n = _itemSeq++;
+    const papelSelId = `mp_papel_id_${n}`;
+    const pliegosId = `mp_cantidad_pliegos_${n}`;
+    const costos = datos.detalles_costos || {};
+    const filasCostos = LISTA_COSTOS.map(c => {
+        const val = (costos[c] != null) ? costos[c] : '';
+        return `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${esc(c)}" value="${val}" placeholder="0" onfocus="if(this.value=='0')this.value=''"></div>`;
+    }).join('');
+
+    return `
+    <div class="item-presupuesto" data-papel-select="${papelSelId}" data-pliegos="${pliegosId}"
+         style="border:1px solid var(--line); border-radius:8px; padding:15px; position:relative;">
+        <button type="button" onclick="quitarItemPresupuesto(this)" title="Quitar producto"
+                style="position:absolute; top:8px; right:8px; background:none; border:none; font-size:16px; cursor:pointer; color:var(--red);">🗑️</button>
+
+        <div style="margin-bottom: 12px;">
+            <label style="font-size:12px; color:var(--muted);">Producto</label>
+            <input type="text" class="item-descripcion" placeholder="Ej: Bolsas 26x33x12 tipo delivery" required
+                   value="${esc(datos.descripcion || '')}"
+                   style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+        </div>
+
+        <div style="display:flex; gap:12px; margin-bottom: 12px;">
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Cantidad</label>
+                <input type="number" class="item-cantidad" value="${datos.cantidad != null ? datos.cantidad : 1}" min="1" required
+                       oninput="calcularModal()"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Precio unitario</label>
+                <input type="number" class="item-precio-unitario" step="0.01" min="0" value="${datos.precio_unitario != null ? datos.precio_unitario : ''}" placeholder="Ej: 265" required
+                       oninput="calcularModal()"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Total</label>
+                <input type="text" class="item-total" readonly value="$ 0"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--magenta-soft); font-weight:bold; color:var(--magenta);">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:12px; margin-bottom: 12px;">
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Material / Tipo de papel</label>
+                <input type="text" class="item-material" placeholder="Ej: Kraft" value="${esc(datos.material || '')}"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Gramaje (g/m²)</label>
+                <input type="text" class="item-gramaje" placeholder="Ej: 120" value="${esc(datos.gramaje || '')}"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+        </div>
+
+        <!-- Papel del stock: permite que la orden del trabajo convertido descuente
+             pliegos. material/gramaje de arriba es el texto del presupuesto. -->
+        <div style="display:flex; gap:12px; margin-bottom: 12px;">
+            <div style="flex:2;">
+                <label style="font-size:12px; color:var(--muted);">Papel del stock (opcional, para descontar)</label>
+                <select id="${papelSelId}" class="item-papel-id" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;"
+                        onchange="sincronizarPliegosConPapel('${papelSelId}', '${pliegosId}')">
+                    <option value="">Sin papel del stock</option>
+                </select>
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:12px; color:var(--muted);">Pliegos a consumir</label>
+                <input type="number" id="${pliegosId}" class="item-cantidad-pliegos" step="1" min="1" placeholder="Ej: 500" disabled
+                       value="${datos.cantidad_pliegos != null ? datos.cantidad_pliegos : ''}"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+        </div>
+
+        <!-- Costos internos opcionales: alimentan la hoja de costos, no el precio. -->
+        <details style="margin-bottom: 5px;">
+            <summary style="cursor:pointer; font-size:12px; color:var(--muted);">Costos internos (opcional)</summary>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
+                ${filasCostos}
+            </div>
+            <div style="margin-top:10px;">
+                <label style="font-size:12px; color:var(--muted);">% de ganancia (informativo)</label>
+                <input type="number" class="item-margen" placeholder="Ej: 35" value="${datos.margen_ganancia != null ? datos.margen_ganancia : ''}"
+                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            </div>
+        </details>
+    </div>`;
+}
+
+// Agrega una tarjeta de ítem al contenedor y le puebla el select de papel.
+async function agregarItemPresupuesto(datos = {}) {
+    const cont = document.getElementById('contenedor-items');
+    cont.insertAdjacentHTML('beforeend', renderItemPresupuesto(datos));
+    const tarjeta = cont.lastElementChild;
+    // Poblar el select de papel de esta tarjeta (por id, como el resto).
+    await cargarSelectorPapelItem(tarjeta);
+    // Precargar el papel elegido (al editar/duplicar) después de tener opciones.
+    if (datos.papel_id) {
+        const sel = tarjeta.querySelector('.item-papel-id');
+        sel.value = datos.papel_id;
+        sincronizarPliegosConPapel(tarjeta.dataset.papelSelect, tarjeta.dataset.pliegos);
+        if (datos.cantidad_pliegos != null) {
+            tarjeta.querySelector('.item-cantidad-pliegos').value = datos.cantidad_pliegos;
+        }
+    }
+    calcularModal();
+}
+
+function quitarItemPresupuesto(btn) {
+    const cont = document.getElementById('contenedor-items');
+    if (cont.querySelectorAll('.item-presupuesto').length <= 1) {
+        Swal.fire('Un producto como mínimo', 'El presupuesto tiene que tener al menos un producto.', 'info');
+        return;
+    }
+    btn.closest('.item-presupuesto').remove();
+    calcularModal();
+}
+
+// Puebla el select de papel de UNA tarjeta con los artículos medidos en pliegos.
+async function cargarSelectorPapelItem(tarjeta) {
+    const stock = await (await fetch(`${API_URL}/stock/`)).json();
+    const papeles = stock.filter(a => a.unidad === 'Pliegos');
+    const sel = tarjeta.querySelector('.item-papel-id');
+    const actual = sel.value;
+    sel.innerHTML = '<option value="">Sin papel del stock</option>' +
+        papeles.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
+    sel.value = actual;
+}
+
 async function abrirDrawerPresupuesto() {
     idPresupuestoVersionDe = null; // Reseteamos por si era nuevo
     idPresupuestoEditando = null;
+    _itemSeq = 0;
     document.getElementById('modal-presupuesto').classList.remove('hidden');
     // Por defecto visible (editar lo oculta); acá lo restauramos.
     document.getElementById('mp-asociar-trabajo-row').style.display = '';
@@ -1463,17 +1602,11 @@ async function abrirDrawerPresupuesto() {
     // acá se inventaba uno al azar que no coincidía con nada y cambiaba cada
     // vez que se abría el modal.
     document.getElementById('lbl-pres-id').innerHTML = `<span style="color:var(--muted); font-size:13px;">Nº (se asigna al guardar)</span>`;
-    
-    const cont = document.getElementById('contenedor-costos');
-    cont.innerHTML = '';
-    LISTA_COSTOS.forEach(c => {
-        cont.innerHTML += `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${c}" value="0" oninput="calcularModal()" onfocus="if(this.value=='0')this.value=''"></div>`;
-    });
 
-    // Con await: editarPresupuesto() y duplicar() llaman a esta función y recién
-    // después asignan mp_papel_id. Si las opciones no estuvieran cargadas
-    // todavía, la asignación no encontraría el <option> y se perdería el papel.
-    await cargarSelectoresPapel();
+    // Arrancamos con un ítem vacío. editarPresupuesto/duplicar lo limpian y
+    // cargan los suyos.
+    document.getElementById('contenedor-items').innerHTML = '';
+    await agregarItemPresupuesto();
 
     try {
         const resp = await fetch(`${API_URL}/clientes/`);
@@ -1503,26 +1636,22 @@ async function abrirDrawerPresupuesto() {
 function cerrarModalPresupuesto() {
     document.getElementById('modal-presupuesto').classList.add('hidden');
     document.getElementById('form-presupuesto').reset();
+    document.getElementById('contenedor-items').innerHTML = '';
 }
 
+// Recalcula el total de cada ítem (cantidad × precio unitario) y el total del
+// presupuesto (suma de los ítems). Preview en vivo; el valor definitivo lo
+// guarda el backend (Decimal).
 function calcularModal() {
-    const inputs = document.querySelectorAll('.input-costo');
-    let subtotal = 0;
-    inputs.forEach(i => subtotal += (parseFloat(i.value) || 0));
-    
-    const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
-    const cantidad = parseInt(document.getElementById('mp_cantidad').value) || 1;
-    
-    const ganancia = subtotal * (margen / 100);
-    const total = subtotal + ganancia;
-    const unidad = total / cantidad;
-
-    // Preview en vivo. El valor definitivo lo recalcula y guarda el backend (Decimal).
-    document.getElementById('lbl-m-subtotal').innerText = `$ ${fmtMoney(subtotal)}`;
-    document.getElementById('lbl-m-txt-ganancia').innerText = `${margen}% de ganancia`;
-    document.getElementById('lbl-m-ganancia').innerText = `$ ${fmtMoney(ganancia)}`;
+    let total = 0;
+    document.querySelectorAll('.item-presupuesto').forEach(tarjeta => {
+        const cantidad = parseInt(tarjeta.querySelector('.item-cantidad').value) || 0;
+        const precioUnit = parseFloat(tarjeta.querySelector('.item-precio-unitario').value) || 0;
+        const totalItem = cantidad * precioUnit;
+        tarjeta.querySelector('.item-total').value = `$ ${fmtMoney(totalItem)}`;
+        total += totalItem;
+    });
     document.getElementById('lbl-m-total').innerText = `$ ${fmtMoney(total)}`;
-    document.getElementById('lbl-m-unidad').innerText = `$ ${fmtMoney(unidad)}`;
 }
 
 // AGREGAR ESTA FUNCIÓN NUEVA
@@ -1533,31 +1662,13 @@ async function duplicarPresupuesto(id) {
         if (!p) return;
 
         await abrirDrawerPresupuesto(); // Prepara el modal limpio
-        
+
         idPresupuestoVersionDe = id; // Clavamos la relación
         document.getElementById('lbl-pres-id').innerHTML = `<span style="color:var(--muted); font-size:13px;">Nº (se asigna al guardar)</span> <span style="color:var(--magenta); font-size:12px;">(Versión de #${id.substring(0,6).toUpperCase()})</span>`;
-        
-        // Rellenamos
-        document.getElementById('mp_cliente_id').value = p.cliente_id || '';
-        document.getElementById('mp_descripcion').value = p.descripcion;
-        document.getElementById('mp_cantidad').value = p.cantidad;
-        document.getElementById('mp_material').value = p.material || '';
-        document.getElementById('mp_gramaje').value = p.gramaje || '';
-        document.getElementById('mp_papel_id').value = p.papel_id || '';
-        document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
-        // Después de asignar los dos, no antes: el campo arranca deshabilitado y
-        // hay que habilitarlo si el presupuesto ya traía un papel elegido.
-        sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos');
-        document.getElementById('mp_margen').value = p.margen_ganancia;
-        document.getElementById('mp_estado').value = "Borrador";
 
-        // Rellenamos los costos específicos
-        document.querySelectorAll('.input-costo').forEach(input => {
-            const nombre = input.getAttribute('data-nombre');
-            if (p.detalles_costos && p.detalles_costos[nombre]) {
-                input.value = p.detalles_costos[nombre];
-            }
-        });
+        document.getElementById('mp_cliente_id').value = p.cliente_id || '';
+        document.getElementById('mp_estado').value = "Borrador";
+        await cargarItemsEnModal(p.items);
         calcularModal();
     } catch (e) { console.error(e); }
 }
@@ -1578,74 +1689,89 @@ async function editarPresupuesto(id) {
         document.getElementById('mp-asociar-trabajo-row').style.display = 'none';
 
         document.getElementById('mp_cliente_id').value = p.cliente_id || '';
-        document.getElementById('mp_descripcion').value = p.descripcion;
-        document.getElementById('mp_cantidad').value = p.cantidad;
-        document.getElementById('mp_material').value = p.material || '';
-        document.getElementById('mp_gramaje').value = p.gramaje || '';
-        document.getElementById('mp_papel_id').value = p.papel_id || '';
-        document.getElementById('mp_cantidad_pliegos').value = p.cantidad_pliegos || '';
-        // Después de asignar los dos, no antes: el campo arranca deshabilitado y
-        // hay que habilitarlo si el presupuesto ya traía un papel elegido.
-        sincronizarPliegosConPapel('mp_papel_id', 'mp_cantidad_pliegos');
-        document.getElementById('mp_margen').value = p.margen_ganancia;
         document.getElementById('mp_estado').value = p.estado;
-
-        document.querySelectorAll('.input-costo').forEach(input => {
-            const nombre = input.getAttribute('data-nombre');
-            if (p.detalles_costos && p.detalles_costos[nombre]) {
-                input.value = p.detalles_costos[nombre];
-            }
-        });
+        await cargarItemsEnModal(p.items);
         calcularModal();
     } catch (e) { console.error(e); }
+}
+
+// Reemplaza las tarjetas del modal por una por cada ítem del presupuesto.
+async function cargarItemsEnModal(items) {
+    document.getElementById('contenedor-items').innerHTML = '';
+    _itemSeq = 0;
+    for (const item of (items || [])) {
+        await agregarItemPresupuesto(item);
+    }
+    // Un presupuesto siempre tiene al menos un ítem, pero por las dudas.
+    if (!document.querySelector('.item-presupuesto')) {
+        await agregarItemPresupuesto();
+    }
+}
+
+// Recolecta los ítems de las tarjetas del modal, validando el par papel+pliegos
+// por ítem. Devuelve el array o null si hay un error (ya avisado al operador).
+function recolectarItemsDelModal() {
+    const items = [];
+    const tarjetas = document.querySelectorAll('.item-presupuesto');
+    for (const [i, tarjeta] of tarjetas.entries()) {
+        const descripcion = tarjeta.querySelector('.item-descripcion').value.trim();
+        const cantidad = parseInt(tarjeta.querySelector('.item-cantidad').value);
+        const precioUnitario = parseFloat(tarjeta.querySelector('.item-precio-unitario').value);
+        const papelId = tarjeta.querySelector('.item-papel-id').value || null;
+        const pliegos = parseFloat(tarjeta.querySelector('.item-cantidad-pliegos').value) || null;
+
+        // Papel del stock: los dos campos van juntos o no van.
+        if (papelId && !pliegos) {
+            Swal.fire('Faltan los pliegos', `Producto ${i + 1}: elegiste un papel del stock, indicá cuántos pliegos consume para que la orden pueda descontarlos.`, 'warning');
+            return null;
+        }
+        if (pliegos && !papelId) {
+            Swal.fire('Falta el papel', `Producto ${i + 1}: cargaste una cantidad de pliegos pero no elegiste de qué papel del stock descontarlos.`, 'warning');
+            return null;
+        }
+
+        // Costos internos opcionales de este ítem.
+        const detalles = {};
+        tarjeta.querySelectorAll('.input-costo').forEach(inp => {
+            const val = parseFloat(inp.value) || 0;
+            if (val > 0) detalles[inp.getAttribute('data-nombre')] = val;
+        });
+        const margen = parseFloat(tarjeta.querySelector('.item-margen').value);
+
+        items.push({
+            descripcion,
+            cantidad,
+            precio_unitario: precioUnitario,
+            material: tarjeta.querySelector('.item-material').value.trim() || null,
+            gramaje: tarjeta.querySelector('.item-gramaje').value.trim() || null,
+            papel_id: papelId,
+            cantidad_pliegos: pliegos,
+            detalles_costos: Object.keys(detalles).length ? detalles : null,
+            margen_ganancia: Number.isFinite(margen) ? margen : null,
+            orden: i,
+        });
+    }
+    return items;
 }
 
 async function guardarPresupuestoModerno(e) {
     e.preventDefault();
     const restore = disableButtonOnSubmit(e);
-    const inputs = document.querySelectorAll('.input-costo');
-    let detalles = {}; let subtotal = 0;
-    inputs.forEach(i => {
-        const val = parseFloat(i.value) || 0;
-        if (val > 0) { detalles[i.getAttribute('data-nombre')] = val; subtotal += val; }
-    });
 
-    const margen = parseFloat(document.getElementById('mp_margen').value) || 0;
-
-    // Papel del stock: los dos campos van juntos o no van. Elegir un papel sin
-    // decir cuántos pliegos no descuenta nada, y poner pliegos sin papel no
-    // tiene a qué aplicarlos.
-    const papelId = document.getElementById('mp_papel_id').value || null;
-    const pliegos = parseFloat(document.getElementById('mp_cantidad_pliegos').value) || null;
-    if (papelId && !pliegos) {
-        Swal.fire('Faltan los pliegos', 'Elegiste un papel del stock: indicá cuántos pliegos consume el trabajo para que la orden pueda descontarlos.', 'warning');
-        restore();
-        return;
-    }
-    if (pliegos && !papelId) {
-        Swal.fire('Falta el papel', 'Cargaste una cantidad de pliegos pero no elegiste de qué papel del stock descontarlos.', 'warning');
-        restore();
-        return;
-    }
+    const items = recolectarItemsDelModal();
+    if (items === null) { restore(); return; }  // Error de papel/pliegos ya avisado.
 
     try {
         if (idPresupuestoEditando) {
-            // Edición: solo mandamos los campos editables, el backend recalcula costo/precio.
+            // Edición: cliente, estado y la lista completa de ítems (reemplaza).
             const payloadEdicion = {
                 cliente_id: document.getElementById('mp_cliente_id').value || null,
-                descripcion: document.getElementById('mp_descripcion').value,
-                cantidad: parseInt(document.getElementById('mp_cantidad').value),
-                material: document.getElementById('mp_material').value || null,
-                gramaje: document.getElementById('mp_gramaje').value || null,
-                detalles_costos: detalles,
-                margen_ganancia: margen,
                 estado: document.getElementById('mp_estado').value,
-                papel_id: papelId,
-                cantidad_pliegos: pliegos
+                items,
             };
             const resp = await fetch(`${API_URL}/presupuestos/${idPresupuestoEditando}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEdicion) });
             if (!resp.ok) {
-                const err = await resp.json();
+                const err = await resp.json().catch(() => ({}));
                 Swal.fire('No se pudo guardar', err.detail || 'Error desconocido', 'error');
                 return;
             }
@@ -1653,24 +1779,13 @@ async function guardarPresupuestoModerno(e) {
             cargarPresupuestos();
             Swal.fire({ title: '¡Actualizado!', text: 'Presupuesto editado con éxito', icon: 'success', timer: 1500, showConfirmButton: false });
         } else {
-            // OJO: costo_materiales y precio_final los RECALCULA el backend a partir de
-            // detalles_costos y margen_ganancia. Se mandan en 0 solo para cumplir el schema.
             const payload = {
                 cliente_id: document.getElementById('mp_cliente_id').value || null,
-                trabajo_id: document.getElementById('mp_trabajo_id').value || null,
+                trabajo_asociado_id: document.getElementById('mp_trabajo_id').value || null,
                 version_de: idPresupuestoVersionDe,
-                descripcion: document.getElementById('mp_descripcion').value,
-                cantidad: parseInt(document.getElementById('mp_cantidad').value),
-                material: document.getElementById('mp_material').value || null,
-                gramaje: document.getElementById('mp_gramaje').value || null,
-                costo_materiales: 0,
-                detalles_costos: detalles,
-                margen_ganancia: margen,
-                precio_final: 0,
                 estado: document.getElementById('mp_estado').value,
                 fecha_creacion: new Date().toISOString().split('T')[0],
-                papel_id: papelId,
-                cantidad_pliegos: pliegos
+                items,
             };
             const respNuevo = await fetch(`${API_URL}/presupuestos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!respNuevo.ok) {
@@ -1767,16 +1882,27 @@ async function cargarPresupuestos() {
                 : `<button class="btn secondary" style="font-size:12px; padding:6px;" onclick="editarPresupuesto('${p.id}')">✏️ Editar</button>
                    <button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarPresupuesto('${p.id}', this)">🗑️</button>`;
 
+            // Resumen de los productos: el primero, y "y N más" si hay varios.
+            const items = p.items || [];
+            const primero = items[0];
+            let resumenItems = '<span style="color:var(--muted);">Sin productos</span>';
+            if (primero) {
+                resumenItems = `${primero.cantidad}x ${esc(primero.descripcion)}`;
+                if (items.length > 1) {
+                    resumenItems += ` <span style="font-size:11px; color:var(--muted);">y ${items.length - 1} más</span>`;
+                }
+            }
+
             tbody.innerHTML += `
                 <tr>
                     <td>${p.fecha_creacion}</td>
-                    <td><b>${nombreCliente}</b></td>
+                    <td><b>${esc(nombreCliente)}</b></td>
                     <td>
                         <span style="font-size:11px; color:var(--muted);">#${shortId}</span><br>
-                        ${p.cantidad}x ${p.descripcion} 
+                        ${resumenItems}
                         ${versionBadge}
                     </td>
-                    <td class="tnum" style="color:var(--magenta); font-weight:bold;">$ ${fmtMoney(p.precio_final)}</td>
+                    <td class="tnum" style="color:var(--magenta); font-weight:bold;">$ ${fmtMoney(p.total)}</td>
                     <td>${estadoBadge}</td>
                     <td style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
                         ${btnConvertir}
@@ -1812,8 +1938,10 @@ async function convertirATrabajo(presupuesto_id, button) {
 
         let cancelarAnterior = false;
         const madre = p.version_de ? presupuestos.find(x => x.id === p.version_de) : null;
+        // Trabajos que generó la madre (uno por ítem convertido).
+        const trabajosMadre = madre ? (madre.items || []).map(it => it.trabajo_id).filter(Boolean) : [];
 
-        if (madre && madre.trabajo_id) {
+        if (trabajosMadre.length) {
             const accion = await Swal.fire({
                 title: 'Presupuesto Duplicado',
                 text: 'Este presupuesto es una corrección/versión de otro anterior. ¿Qué hacemos con el trabajo original?',
@@ -1849,23 +1977,26 @@ async function convertirATrabajo(presupuesto_id, button) {
             throw new Error(err.detail || "No se pudo convertir el presupuesto.");
         }
 
-        // La conversión ya está hecha: si falla la cancelación del trabajo
+        // La conversión ya está hecha: si falla la cancelación de algún trabajo
         // anterior avisamos, pero no la reportamos como fallida. Por eso el
         // fetch va con su propio try: un error de red acá NO significa que la
         // conversión haya fallado, y el catch de abajo diría lo contrario.
         // La versión anterior se descarta, así que su papel vuelve al stock.
+        // La madre puede tener varios trabajos (uno por ítem): se cancelan todos.
         let avisoCancelacion = '';
         if (cancelarAnterior) {
-            try {
-                const respCancel = await fetch(`${API_URL}/trabajos/${madre.trabajo_id}?devolver_papel=true`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ estado: "Cancelado" })
-                });
-                if (!respCancel.ok) throw new Error('respuesta no OK');
-            } catch (e) {
-                console.error('Error al cancelar el trabajo anterior:', e);
-                avisoCancelacion = 'El trabajo nuevo se creó, pero no se pudo cancelar el trabajo anterior. Cancelalo con el botón ✖ de su tarjeta en el Dashboard de trabajo.';
+            for (const trabajoId of trabajosMadre) {
+                try {
+                    const respCancel = await fetch(`${API_URL}/trabajos/${trabajoId}?devolver_papel=true`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ estado: "Cancelado" })
+                    });
+                    if (!respCancel.ok) throw new Error('respuesta no OK');
+                } catch (e) {
+                    console.error('Error al cancelar un trabajo anterior:', e);
+                    avisoCancelacion = 'Los trabajos nuevos se crearon, pero no se pudo cancelar algún trabajo anterior. Cancelalo con el botón ✖ de su tarjeta en el Dashboard de trabajo.';
+                }
             }
             // (Se eliminó el Movimiento monto:0 de "cancelado por corrección": no es plata real.)
         }
@@ -1917,11 +2048,25 @@ function sanitizarNombreArchivo(txt) {
 }
 
 // 1. PDF PARA EL CLIENTE (formal, formato Gráfica Viamonte)
+// NOTA: pendiente de migrar al backend (Etapa B). Por ahora sigue en el
+// frontend, pero ya itera los ítems del presupuesto (una fila por producto).
 async function generarPDFCliente(presupuesto_id) {
     const { p, c } = await armarMoldeBasePDF(presupuesto_id);
     const nombreCliente = c ? c.nombre_completo : 'Sin cliente';
     const fecha = fmtFechaAR(p.fecha_creacion);
-    const precioUnitario = p.cantidad ? Number(p.precio_final) / p.cantidad : Number(p.precio_final);
+    const items = p.items || [];
+    const total = items.reduce((acc, it) => acc + (Number(it.cantidad) * Number(it.precio_unitario)), 0);
+
+    const filas = items.map(it => {
+        const totalItem = Number(it.cantidad) * Number(it.precio_unitario);
+        return `
+                    <tr>
+                        <td style="border:1px solid #ccc; padding:10px; word-break:break-word; white-space:pre-wrap;">${esc(it.descripcion)}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:center;">${it.cantidad}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:right;">${fmtMoney(it.precio_unitario)}</td>
+                        <td style="border:1px solid #ccc; padding:10px; text-align:right; font-weight:bold;">${fmtMoney(totalItem)}</td>
+                    </tr>`;
+    }).join('');
 
     const div = document.createElement('div');
     div.style.fontFamily = 'Arial, sans-serif';
@@ -1940,7 +2085,7 @@ async function generarPDFCliente(presupuesto_id) {
         <div style="padding:0 40px;">
             <div style="text-align:left; margin-top:20px; font-size:13px;">
                 <p style="margin:4px 0;">Fecha de emisión: ${fecha} - S.M. de Tucumán.</p>
-                <p style="margin:4px 0;">Cliente: ${nombreCliente}</p>
+                <p style="margin:4px 0;">Cliente: ${esc(nombreCliente)}</p>
             </div>
 
             <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:13px;">
@@ -1952,19 +2097,13 @@ async function generarPDFCliente(presupuesto_id) {
                         <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:right; width:110px;">Precio Total</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr>
-                        <td style="border:1px solid #ccc; padding:10px; word-break:break-word; white-space:pre-wrap;">${p.descripcion}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:center;">${p.cantidad}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:right;">${fmtMoney(precioUnitario)}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:right; font-weight:bold;">${fmtMoney(p.precio_final)}</td>
-                    </tr>
+                <tbody>${filas}
                 </tbody>
             </table>
 
             <div style="display:flex; justify-content:flex-end; margin-top:15px;">
                 <div style="border:2px solid #111; padding:10px 18px;">
-                    <span style="font-size:18px; font-weight:bold;">TOTAL: $ ${fmtMoney(p.precio_final)}</span>
+                    <span style="font-size:18px; font-weight:bold;">TOTAL: $ ${fmtMoney(total)}</span>
                 </div>
             </div>
 
@@ -1995,28 +2134,42 @@ async function generarPDFInterno(presupuesto_id) {
     const { p, c } = await armarMoldeBasePDF(presupuesto_id);
     const nombreCliente = c ? c.nombre_completo : 'Sin cliente';
     const shortId = p.id.substring(0,6).toUpperCase();
+    const items = p.items || [];
 
-    let filasCostos = '';
-    for (const [item, monto] of Object.entries(p.detalles_costos || {})) {
-        filasCostos += `<tr><td style="border:1px solid #ddd; padding:8px;">${item}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(monto)}</td></tr>`;
-    }
-    if (!filasCostos) filasCostos = `<tr><td colspan="2" style="border:1px solid #ddd; padding:8px; color:#999;">Sin costos cargados</td></tr>`;
+    // Una sección por producto: su desglose de costos, subtotal y precio.
+    let totalPresupuesto = 0;
+    const secciones = items.map((it, idx) => {
+        const totalItem = Number(it.cantidad) * Number(it.precio_unitario);
+        totalPresupuesto += totalItem;
+        const costo = Number(it.costo_materiales || 0);
+
+        let filasCostos = '';
+        for (const [nombre, monto] of Object.entries(it.detalles_costos || {})) {
+            filasCostos += `<tr><td style="border:1px solid #ddd; padding:8px;">${esc(nombre)}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(monto)}</td></tr>`;
+        }
+        if (!filasCostos) filasCostos = `<tr><td colspan="2" style="border:1px solid #ddd; padding:8px; color:#999;">Sin costos cargados</td></tr>`;
+
+        return `
+        <div style="margin-top:18px;">
+            <p style="font-size:13px; margin:2px 0;"><b>Producto ${idx + 1}:</b> ${it.cantidad}x ${esc(it.descripcion)}</p>
+            <p style="font-size:13px; margin:2px 0;"><b>Material:</b> ${esc(it.material) || '-'} &nbsp;|&nbsp; <b>Gramaje:</b> ${it.gramaje ? esc(it.gramaje) + ' g/m²' : '-'}</p>
+            <p style="font-size:13px; margin:2px 0;"><b>Precio unitario:</b> $ ${fmtMoney(it.precio_unitario)} &nbsp;|&nbsp; <b>Total:</b> $ ${fmtMoney(totalItem)}</p>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
+                <tr style="background:#eee;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Ítem de Costo</th><th style="border:1px solid #ddd; padding:8px; text-align:right;">Monto</th></tr>
+                ${filasCostos}
+                <tr style="background:#ffe6f2;"><td style="border:1px solid #ddd; padding:8px;"><b>SUBTOTAL COSTOS</b></td><td style="border:1px solid #ddd; padding:8px; text-align:right;"><b>$ ${fmtMoney(costo)}</b></td></tr>
+                <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia estimada${it.margen_ganancia != null ? ` (${it.margen_ganancia}% informativo)` : ''}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(totalItem - costo)}</td></tr>
+            </table>
+        </div>`;
+    }).join('');
 
     const div = document.createElement('div');
     div.style.padding = '40px'; div.style.fontFamily = 'Arial';
     div.innerHTML = `
         <h2 style="margin-bottom:6px;">[INTERNO] Hoja de Costos - #${shortId}</h2>
-        <p style="font-size:13px; margin:2px 0;"><b>Cliente:</b> ${nombreCliente}</p>
-        <p style="font-size:13px; margin:2px 0;"><b>Producto:</b> ${p.descripcion}</p>
-        <p style="font-size:13px; margin:2px 0;"><b>Material:</b> ${p.material || '-'} &nbsp;|&nbsp; <b>Gramaje:</b> ${p.gramaje ? p.gramaje + ' g/m²' : '-'}</p>
-        <p style="font-size:13px; margin:2px 0;"><b>Cantidad de pliegos:</b> ${p.cantidad}</p>
-        <table style="width:100%; border-collapse:collapse; margin-top:18px; font-size:13px;">
-            <tr style="background:#eee;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Ítem de Costo</th><th style="border:1px solid #ddd; padding:8px; text-align:right;">Monto</th></tr>
-            ${filasCostos}
-            <tr style="background:#ffe6f2;"><td style="border:1px solid #ddd; padding:8px;"><b>SUBTOTAL COSTOS</b></td><td style="border:1px solid #ddd; padding:8px; text-align:right;"><b>$ ${fmtMoney(p.costo_materiales)}</b></td></tr>
-            <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia Aplicada (${p.margen_ganancia}%)</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(Number(p.precio_final) - Number(p.costo_materiales))}</td></tr>
-        </table>
-        <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $ ${fmtMoney(p.precio_final)}</h3>
+        <p style="font-size:13px; margin:2px 0;"><b>Cliente:</b> ${esc(nombreCliente)}</p>
+        ${secciones}
+        <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $ ${fmtMoney(totalPresupuesto)}</h3>
     `;
     html2pdf().set({ margin: 10, filename: `Costos_Internos_${shortId}.pdf` }).from(div).save();
 }

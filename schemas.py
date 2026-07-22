@@ -1,9 +1,10 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, computed_field, field_validator, model_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 import models
+from money import Q2
 
 
 def _validar_detalles_costos(valor: Optional[dict]) -> Optional[dict]:
@@ -202,45 +203,80 @@ class IniciarDisenoRequest(BaseModel):
 
 
 # --- ESQUEMAS PARA PRESUPUESTOS ---
-class PresupuestoBase(BaseModel):
-    # Opcional: permite guardar un borrador sin cliente asignado todavía.
-    cliente_id: Optional[str] = None
-    trabajo_id: Optional[str] = None
-    version_de: Optional[str] = None
-    numero_secuencia: Optional[str] = None
+# Un presupuesto tiene UNO O VARIOS ítems (productos). Cada ítem lleva su precio
+# unitario, que es lo que ve el cliente; los costos y el margen son opcionales y
+# sólo alimentan la hoja de costos interna y el cálculo de ganancia.
+class ItemPresupuestoBase(BaseModel):
     descripcion: str
     cantidad: int
-    material: Optional[str] = None   # tipo de papel
-    gramaje: Optional[str] = None    # g/m²
-    costo_materiales: Decimal
+    precio_unitario: Decimal
+    # Costos internos opcionales. costo_materiales lo deriva el backend de
+    # detalles_costos; el margen queda a título informativo.
     detalles_costos: Optional[dict] = None
-    margen_ganancia: Decimal
-    precio_final: Decimal
-    estado: Optional[str] = "Borrador"
-    convertido_a_trabajo: Optional[bool] = False
-    fecha_creacion: date
-    # Papel del stock que va a consumir el trabajo. Opcional: lo puede traer el
-    # cliente o comprarse en el momento. El trabajo lo hereda al convertirse.
+    margen_ganancia: Optional[Decimal] = None
+    # Papel del ítem: material/gramaje es el texto del presupuesto; papel_id +
+    # cantidad_pliegos son para descontar del stock. El trabajo lo hereda.
+    material: Optional[str] = None
+    gramaje: Optional[str] = None
     papel_id: Optional[str] = None
     cantidad_pliegos: Optional[Decimal] = None
+    orden: int = 0
 
     _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
     _margen_valido = field_validator("margen_ganancia")(_validar_margen)
-    _montos_validos = field_validator("costo_materiales", "precio_final")(
-        _validar_monto_no_negativo
-    )
+    _precio_valido = field_validator("precio_unitario")(_validar_monto_no_negativo)
+
+
+class ItemPresupuestoCreate(ItemPresupuestoBase):
+    pass
+
+
+class ItemPresupuestoResponse(ItemPresupuestoBase):
+    id: str
+    costo_materiales: Optional[Decimal] = None
+    trabajo_id: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        """Total del ítem = cantidad * precio_unitario (no se persiste)."""
+        return Q2(self.cantidad * self.precio_unitario)
+
+
+class PresupuestoBase(BaseModel):
+    # Opcional: permite guardar un borrador sin cliente asignado todavía.
+    cliente_id: Optional[str] = None
+    # Si viene, asocia el presupuesto (de UN solo ítem) a un trabajo ya creado
+    # que todavía no tenía presupuesto. Reemplaza al viejo trabajo_id de cabecera.
+    trabajo_asociado_id: Optional[str] = None
+    version_de: Optional[str] = None
+    numero_secuencia: Optional[str] = None
+    estado: Optional[str] = "Borrador"
+    convertido_a_trabajo: Optional[bool] = False
+    fecha_creacion: date
+
 
 class PresupuestoCreate(PresupuestoBase):
-    # El backend recalcula costo_materiales y precio_final a partir de
-    # detalles_costos y margen_ganancia, así que estos pueden venir en 0.
-    # trabajo_id (heredado de PresupuestoBase) es opcional: si viene, asocia el
-    # presupuesto a un trabajo ya creado que todavía no tenía presupuesto.
-    costo_materiales: Decimal = Decimal("0")
-    precio_final: Decimal = Decimal("0")
+    items: list[ItemPresupuestoCreate]
+
+    @model_validator(mode="after")
+    def _al_menos_un_item(self):
+        if not self.items:
+            raise ValueError("El presupuesto tiene que tener al menos un ítem.")
+        return self
+
 
 class PresupuestoResponse(PresupuestoBase):
     id: str
+    items: list[ItemPresupuestoResponse]
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        """Total del presupuesto = suma de los totales de sus ítems."""
+        return Q2(sum((i.total for i in self.items), Decimal("0")))
 
 # Fila del "Informe general de trabajos a clientes". Se arma a partir de los
 # presupuestos, cruzando el trabajo asociado (si ya se convirtió). Los campos
@@ -261,21 +297,12 @@ class InformeTrabajoRow(BaseModel):
     observaciones: str
 
 
-# Esquema para EDITAR un presupuesto existente (no se permite tocar convertido_a_trabajo/trabajo_id acá)
+# Esquema para EDITAR un presupuesto existente (no se permite tocar
+# convertido_a_trabajo acá). Si viene 'items', reemplaza toda la lista.
 class PresupuestoUpdate(BaseModel):
     cliente_id: Optional[str] = None
-    descripcion: Optional[str] = None
-    cantidad: Optional[int] = None
-    material: Optional[str] = None
-    gramaje: Optional[str] = None
-    detalles_costos: Optional[dict] = None
-    margen_ganancia: Optional[Decimal] = None
     estado: Optional[str] = None
-    papel_id: Optional[str] = None
-    cantidad_pliegos: Optional[Decimal] = None
-
-    _costos_validos = field_validator("detalles_costos")(_validar_detalles_costos)
-    _margen_valido = field_validator("margen_ganancia")(_validar_margen)
+    items: Optional[list[ItemPresupuestoCreate]] = None
 
 
 # --- ESQUEMAS PARA MOVIMIENTOS ---

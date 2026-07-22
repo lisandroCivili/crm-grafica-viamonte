@@ -118,39 +118,82 @@ class Nota(Base):
     trabajo = relationship("Trabajo", back_populates="notas")
 
 class Presupuesto(Base):
+    """Cabecera de un presupuesto. El detalle (uno o varios productos) vive en
+    ItemPresupuesto: un presupuesto real de la gráfica lleva varios trabajos en
+    el mismo comprobante (ej: bolsas + cajas + papel antigrasa).
+
+    Los datos de cada producto (descripción, cantidad, precio, papel, costos)
+    se movieron al ítem. Acá quedan sólo los datos de cabecera comunes a todo el
+    presupuesto: cliente, número, estado, fecha y el historial de versiones.
+    """
     __tablename__ = "presupuestos"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     # Opcional: un presupuesto se puede guardar como borrador sin cliente asignado
     # todavía. Se le carga el cliente más adelante, antes de convertirlo a trabajo.
     cliente_id = Column(String, ForeignKey("clientes.id"), nullable=True)
-    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True) # Para sincronizar estado
     version_de = Column(String, ForeignKey("presupuestos.id"), nullable=True) # Para el historial de duplicados
     numero_secuencia = Column(String, index=True, nullable=True) # Ej: "0001-000015" (número de comprobante)
-    descripcion = Column(String, nullable=False)
-    cantidad = Column(Integer, nullable=False)
-    # Datos del material que se lee en el presupuesto y alimentan el informe de
-    # trabajos. Texto libre (mismo criterio que papel_tipo en Trabajo).
-    material = Column(String, nullable=True)   # tipo de papel
-    gramaje = Column(String, nullable=True)    # g/m²
-    costo_materiales = Column(Money, nullable=False)
-    detalles_costos = Column(JSON, nullable=True)
-    margen_ganancia = Column(Money, nullable=False)
-    precio_final = Column(Money, nullable=False)
+    # Estado de cabecera. Con varios ítems convertidos a varios trabajos es
+    # informativo ("mejor esfuerzo"): la verdad productiva vive en cada Trabajo.
     estado = Column(String, default="Borrador")
     convertido_a_trabajo = Column(Boolean, default=False)
     fecha_creacion = Column(Date, nullable=False)
 
+    cliente = relationship("Cliente")
+    # cascade delete-orphan: borrar el presupuesto (sólo si no está convertido y
+    # no tiene versiones) borra sus ítems; reemplazar la lista en un PUT limpia
+    # los huérfanos. Un ítem de un presupuesto no convertido es un borrador, no
+    # un movimiento histórico.
+    items = relationship(
+        "ItemPresupuesto",
+        back_populates="presupuesto",
+        cascade="all, delete-orphan",
+        order_by="ItemPresupuesto.orden",
+    )
+
+
+class ItemPresupuesto(Base):
+    """Un producto dentro de un presupuesto. Al convertir el presupuesto, cada
+    ítem se vuelve un Trabajo propio (uno se produce por separado del otro).
+
+    El precio que ve el cliente es precio_unitario, que tipea el usuario; el
+    total del ítem es cantidad * precio_unitario y el del presupuesto la suma de
+    sus ítems. Los costos internos (detalles_costos) y el margen son opcionales:
+    sólo alimentan la hoja de costos interna y el cálculo de ganancia, no el
+    precio de venta.
+    """
+    __tablename__ = "items_presupuesto"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    presupuesto_id = Column(String, ForeignKey("presupuestos.id"), nullable=False)
+    orden = Column(Integer, nullable=False, default=0)  # posición en el comprobante
+
+    # Lo que ve el cliente:
+    descripcion = Column(String, nullable=False)
+    cantidad = Column(Integer, nullable=False)
+    precio_unitario = Column(Money, nullable=False)
+
+    # Costos internos OPCIONALES (hoja de costos y ganancia). costo_materiales se
+    # deriva de detalles_costos; el margen queda a título informativo.
+    detalles_costos = Column(JSON, nullable=True)
+    costo_materiales = Column(Money, nullable=True)
+    margen_ganancia = Column(Money, nullable=True)
+
     # El papel se guarda dos veces, mismo criterio que en Trabajo:
-    # - material/gramaje (arriba) son texto libre y es lo que se lee en el
-    #   presupuesto impreso.
+    # - material/gramaje son texto libre y es lo que se lee en el presupuesto.
     # - papel_id es opcional y sólo existe para saber QUÉ descontar del stock.
-    # Sin estos dos campos el trabajo convertido nacía sin papel y su orden de
-    # producción nunca descontaba nada: el camino más usado del taller dejaba
-    # el stock desfasado sin dar ningún error.
+    # El trabajo que nace de este ítem lo hereda al convertirse; sin esto la
+    # orden de producción nunca descontaría papel.
+    material = Column(String, nullable=True)
+    gramaje = Column(String, nullable=True)
     papel_id = Column(String, ForeignKey("stock.id"), nullable=True)
     cantidad_pliegos = Column(Cantidad, nullable=True)
 
-    cliente = relationship("Cliente")
+    # Trabajo generado al convertir ESTE ítem (1 ítem -> 1 trabajo). Reemplaza al
+    # viejo Presupuesto.trabajo_id: el vínculo presupuesto<->trabajo es por ítem.
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=True)
+
+    presupuesto = relationship("Presupuesto", back_populates="items")
+    papel = relationship("ArticuloStock")
 
 class Gasto(Base):
     __tablename__ = "gastos"

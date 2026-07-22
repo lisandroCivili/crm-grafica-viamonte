@@ -64,12 +64,22 @@ def trabajo(precio, estado="Entregado", id="T1"):
     return SimpleNamespace(id=id, precio_venta=Decimal(precio), estado=estado)
 
 
-def presupuesto(trabajo_id="T1", margen="50", costo="100"):
+def item_presupuesto(trabajo_id="T1", margen="50", costo="100"):
+    """Un ítem de presupuesto: es donde ahora viven el trabajo, el margen y el
+    costo congelados que usa ganancia_bruta_realizada."""
     return SimpleNamespace(
         trabajo_id=trabajo_id,
-        margen_ganancia=Decimal(margen),
-        costo_materiales=Decimal(costo),
+        margen_ganancia=Decimal(margen) if margen is not None else None,
+        costo_materiales=Decimal(costo) if costo is not None else None,
     )
+
+
+def presupuesto(trabajo_id="T1", margen="50", costo="100", items=None):
+    """Presupuesto con uno o varios ítems. Por defecto, un único ítem con los
+    datos económicos (equivale al presupuesto de un producto de antes)."""
+    if items is None:
+        items = [item_presupuesto(trabajo_id, margen, costo)]
+    return SimpleNamespace(items=items)
 
 
 def gasto(monto, categoria="Alquiler", trabajo_id=None, fecha=JULIO):

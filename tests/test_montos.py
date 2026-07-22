@@ -115,64 +115,64 @@ class TestMontoDeCheque:
             schemas.ChequeUpdate(monto=Decimal("-1"))
 
 
+def _presupuesto_body(**item_overrides):
+    """Body de POST /presupuestos con un único ítem para probar validaciones."""
+    item = {"descripcion": "Volantes", "cantidad": 1000, "precio_unitario": 10}
+    item.update(item_overrides)
+    return {"fecha_creacion": str(date.today()), "items": [item]}
+
+
 class TestPresupuesto:
+    """Los costos y el margen son opcionales por ítem: alimentan la hoja de
+    costos interna, no el precio de venta (que es precio_unitario directo)."""
 
     def test_rechaza_un_costo_negativo_en_el_detalle(self, client, db):
         # Complementa el Caso 1: ahí se validó que fueran números, acá que no
         # sean números al revés.
-        r = client.post("/api/presupuestos/", json={
-            "descripcion": "Volantes", "cantidad": 1000,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "detalles_costos": {"papel": -1000},
-        })
+        r = client.post("/api/presupuestos/", json=_presupuesto_body(
+            detalles_costos={"papel": -1000}))
         assert r.status_code == 422
 
     def test_acepta_un_margen_negativo(self, client, db):
         # Vender bajo costo es una decisión comercial válida (liquidar un saldo
         # de papel, no perder un cliente). No es un dato mal cargado.
-        r = client.post("/api/presupuestos/", json={
-            "descripcion": "Volantes", "cantidad": 1000,
-            "margen_ganancia": -10, "fecha_creacion": str(date.today()),
-            "detalles_costos": {"papel": 1000},
-        })
+        r = client.post("/api/presupuestos/", json=_presupuesto_body(
+            margen_ganancia=-10, detalles_costos={"papel": 1000}))
         assert r.status_code == 200
 
     def test_acepta_un_margen_de_menos_cien(self, client, db):
-        # -100% es regalarlo: precio final 0, el mismo caso de cortesía.
-        r = client.post("/api/presupuestos/", json={
-            "descripcion": "Volantes", "cantidad": 1000,
-            "margen_ganancia": -100, "fecha_creacion": str(date.today()),
-            "detalles_costos": {"papel": 1000},
-        })
+        # -100% sigue siendo un margen válido a nivel ítem (dato informativo).
+        r = client.post("/api/presupuestos/", json=_presupuesto_body(
+            margen_ganancia=-100, detalles_costos={"papel": 1000}))
         assert r.status_code == 200
-        assert Decimal(str(r.json()["precio_final"])) == Decimal("0")
 
-    def test_rechaza_un_margen_que_da_precio_negativo(self, client, db):
-        # Menos de -100% significa pagarle al cliente por llevarse el trabajo.
-        r = client.post("/api/presupuestos/", json={
-            "descripcion": "Volantes", "cantidad": 1000,
-            "margen_ganancia": -200, "fecha_creacion": str(date.today()),
-            "detalles_costos": {"papel": 1000},
-        })
+    def test_rechaza_un_margen_menor_a_menos_cien(self, client, db):
+        # El margen es informativo, pero se sigue cortando en -100% para no
+        # guardar un dato sin sentido.
+        r = client.post("/api/presupuestos/", json=_presupuesto_body(
+            margen_ganancia=-200, detalles_costos={"papel": 1000}))
+        assert r.status_code == 422
+
+    def test_rechaza_un_precio_unitario_negativo(self, client, db):
+        # El precio de venta ya no sale del margen: es precio_unitario directo, y
+        # un precio negativo no puede entrar (es lo que antes se cuidaba vía margen).
+        r = client.post("/api/presupuestos/", json=_presupuesto_body(precio_unitario=-5))
         assert r.status_code == 422
 
 
 class TestPrecioNegativoPorLaPuertaDeAtras:
     """convertir_presupuesto crea el Trabajo por ORM, salteando TrabajoCreate.
 
-    Sin cortar el margen, un presupuesto con margen < -100% produce un
-    precio_final negativo que entra a trabajos sin pasar por ninguna
-    validación. Y como TrabajoResponse hereda el validador, el trabajo
-    resultante ni siquiera se puede volver a leer: reventaría al serializar.
+    El precio de venta del trabajo sale de precio_unitario del ítem, que ya no
+    puede ser negativo (_validar_monto_no_negativo). Así, un presupuesto no puede
+    producir un trabajo con precio negativo que después reviente al serializarse.
     """
 
     def test_un_presupuesto_no_puede_producir_un_trabajo_negativo(self, client, db):
         cliente = crear_cliente(db)
         r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id,
-            "descripcion": "Volantes", "cantidad": 1000,
-            "margen_ganancia": -200, "fecha_creacion": str(date.today()),
-            "detalles_costos": {"papel": 1000},
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "items": [{"descripcion": "Volantes", "cantidad": 1000, "precio_unitario": -5}],
         })
         assert r.status_code == 422, "El presupuesto con precio negativo no debería crearse"
 

@@ -15,7 +15,8 @@ from conftest import crear_cliente, crear_papel, crear_presupuesto, crear_trabaj
 class TestConvertirPresupuesto:
 
     def test_hereda_los_datos_economicos(self, client, db):
-        # Guarda de no-regresión de lo que sí se copia hoy.
+        # Guarda de no-regresión: convertir ahora devuelve una LISTA de trabajos
+        # (uno por ítem). Con un solo ítem, es una lista de un trabajo.
         cliente = crear_cliente(db)
         p = crear_presupuesto(db, cliente, precio_final=Decimal("30000"),
                               costo_materiales=Decimal("20000"))
@@ -23,7 +24,9 @@ class TestConvertirPresupuesto:
         r = client.post(f"/api/presupuestos/{p.id}/convertir")
 
         assert r.status_code == 200
-        trabajo = r.json()
+        trabajos = r.json()
+        assert len(trabajos) == 1
+        trabajo = trabajos[0]
         assert Decimal(str(trabajo["precio_venta"])) == Decimal("30000")
         assert Decimal(str(trabajo["costo_total_materiales"])) == Decimal("20000")
         assert trabajo["estado"] == "Aprobado"
@@ -60,7 +63,7 @@ class TestPapelDelPresupuestoConvertido:
         p = crear_presupuesto(db, cliente, papel_id=papel.id,
                               cantidad_pliegos=Decimal("100"))
 
-        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()["id"]
+        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()[0]["id"]
 
         trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
         assert trabajo.papel_id == papel.id
@@ -73,7 +76,7 @@ class TestPapelDelPresupuestoConvertido:
         p = crear_presupuesto(db, cliente, papel_id=papel.id,
                               cantidad_pliegos=Decimal("100"))
 
-        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()["id"]
+        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()[0]["id"]
         assert client.post(f"/api/trabajos/{trabajo_id}/imprimir-orden").status_code == 200
 
         db.refresh(papel)
@@ -88,7 +91,7 @@ class TestPapelDelPresupuestoConvertido:
         r = client.post(f"/api/presupuestos/{p.id}/convertir")
 
         assert r.status_code == 200
-        trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == r.json()["id"]).first()
+        trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == r.json()[0]["id"]).first()
         assert trabajo.papel_id is None
 
     def test_no_pisa_el_material_en_texto(self, client, db):
@@ -102,8 +105,8 @@ class TestPapelDelPresupuestoConvertido:
         client.post(f"/api/presupuestos/{p.id}/convertir")
 
         db.refresh(p)
-        assert p.material == "Obra 90"
-        assert p.gramaje == "90"
+        assert p.items[0].material == "Obra 90"
+        assert p.items[0].gramaje == "90"
 
     def test_el_camino_manual_si_descuenta(self, client, db):
         # Contraste: cargando el trabajo a mano con papel_id, todo funciona.
@@ -124,7 +127,7 @@ class TestPapelDelPresupuestoConvertido:
         papel = crear_papel(db, cantidad=Decimal("500"))
         p = crear_presupuesto(db, cliente)
 
-        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()["id"]
+        trabajo_id = client.post(f"/api/presupuestos/{p.id}/convertir").json()[0]["id"]
         r = client.put(
             f"/api/trabajos/{trabajo_id}",
             json={"papel_id": papel.id, "cantidad_pliegos": 100},
@@ -136,9 +139,21 @@ class TestPapelDelPresupuestoConvertido:
         assert papel.cantidad == Decimal("400.000")
 
 
+def _body_presupuesto(cliente, **campos_item):
+    """Body de POST /presupuestos con un único ítem. campos_item sobreescribe
+    los del ítem (descripcion/cantidad/precio_unitario/papel_id/...)."""
+    item = {"descripcion": "V", "cantidad": 10, "precio_unitario": 100}
+    item.update(campos_item)
+    return {
+        "cliente_id": cliente.id,
+        "fecha_creacion": str(date.today()),
+        "items": [item],
+    }
+
+
 class TestValidacionDelPapelEnPresupuesto:
     """Mismas reglas que en Trabajo: el papel tiene que existir, medirse en
-    pliegos y la cantidad ser un entero positivo.
+    pliegos y la cantidad ser un entero positivo. El papel vive en cada ítem.
 
     Sin esto un presupuesto podría apuntar a un bidón de tinta o a un artículo
     inexistente, y el error recién aparecería al convertir o al imprimir, lejos
@@ -147,21 +162,15 @@ class TestValidacionDelPapelEnPresupuesto:
 
     def test_rechaza_un_papel_inexistente(self, client, db):
         cliente = crear_cliente(db)
-        r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id, "descripcion": "V", "cantidad": 10,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "papel_id": "no-existe", "cantidad_pliegos": 100,
-        })
+        r = client.post("/api/presupuestos/", json=_body_presupuesto(
+            cliente, papel_id="no-existe", cantidad_pliegos=100))
         assert r.status_code == 404
 
     def test_rechaza_un_articulo_que_no_se_mide_en_pliegos(self, client, db):
         cliente = crear_cliente(db)
         tinta = crear_papel(db, nombre="Tinta negra", unidad="Litros")
-        r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id, "descripcion": "V", "cantidad": 10,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "papel_id": tinta.id, "cantidad_pliegos": 100,
-        })
+        r = client.post("/api/presupuestos/", json=_body_presupuesto(
+            cliente, papel_id=tinta.id, cantidad_pliegos=100))
         assert r.status_code == 400
         assert "pliegos" in r.json()["detail"].lower()
 
@@ -169,11 +178,8 @@ class TestValidacionDelPapelEnPresupuesto:
     def test_rechaza_cantidades_de_pliegos_invalidas(self, client, db, pliegos):
         cliente = crear_cliente(db)
         papel = crear_papel(db)
-        r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id, "descripcion": "V", "cantidad": 10,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "papel_id": papel.id, "cantidad_pliegos": pliegos,
-        })
+        r = client.post("/api/presupuestos/", json=_body_presupuesto(
+            cliente, papel_id=papel.id, cantidad_pliegos=pliegos))
         assert r.status_code == 400
 
     def test_rechaza_un_papel_sin_pliegos(self, client, db):
@@ -181,29 +187,25 @@ class TestValidacionDelPapelEnPresupuesto:
         # descuento se saltea sin avisar.
         cliente = crear_cliente(db)
         papel = crear_papel(db)
-        r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id, "descripcion": "V", "cantidad": 10,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "papel_id": papel.id,
-        })
+        r = client.post("/api/presupuestos/", json=_body_presupuesto(
+            cliente, papel_id=papel.id))
         assert r.status_code == 400
         assert "pliegos" in r.json()["detail"].lower()
 
     def test_rechaza_pliegos_sin_papel(self, client, db):
         cliente = crear_cliente(db)
-        r = client.post("/api/presupuestos/", json={
-            "cliente_id": cliente.id, "descripcion": "V", "cantidad": 10,
-            "margen_ganancia": 50, "fecha_creacion": str(date.today()),
-            "cantidad_pliegos": 100,
-        })
+        r = client.post("/api/presupuestos/", json=_body_presupuesto(
+            cliente, cantidad_pliegos=100))
         assert r.status_code == 400
         assert "papel" in r.json()["detail"].lower()
 
     def test_tambien_valida_al_editar(self, client, db):
         cliente = crear_cliente(db)
         p = crear_presupuesto(db, cliente)
-        r = client.put(f"/api/presupuestos/{p.id}",
-                       json={"papel_id": "no-existe", "cantidad_pliegos": 100})
+        r = client.put(f"/api/presupuestos/{p.id}", json={"items": [
+            {"descripcion": "V", "cantidad": 10, "precio_unitario": 100,
+             "papel_id": "no-existe", "cantidad_pliegos": 100},
+        ]})
         assert r.status_code == 404
 
     def test_se_puede_asignar_el_papel_al_editar(self, client, db):
@@ -211,12 +213,14 @@ class TestValidacionDelPapelEnPresupuesto:
         papel = crear_papel(db)
         p = crear_presupuesto(db, cliente)
 
-        r = client.put(f"/api/presupuestos/{p.id}",
-                       json={"papel_id": papel.id, "cantidad_pliegos": 100})
+        r = client.put(f"/api/presupuestos/{p.id}", json={"items": [
+            {"descripcion": "V", "cantidad": 10, "precio_unitario": 100,
+             "papel_id": papel.id, "cantidad_pliegos": 100},
+        ]})
 
         assert r.status_code == 200
         db.refresh(p)
-        assert p.papel_id == papel.id
+        assert p.items[0].papel_id == papel.id
 
 
 class TestBorrarPapelUsadoPorUnPresupuesto:
@@ -260,3 +264,87 @@ class TestBorrarPapelUsadoPorUnPresupuesto:
         r = client.delete(f"/api/stock/{papel.id}")
         assert r.status_code == 400
         assert "trabajos" in r.json()["detail"].lower()
+
+
+class TestPresupuestoMultiItem:
+    """Un presupuesto real de la gráfica lleva varios productos en el mismo
+    comprobante (bolsas + cajas + antigrasa), y cada uno se produce por separado.
+    """
+
+    def test_crea_un_presupuesto_con_varios_items(self, client, db):
+        cliente = crear_cliente(db)
+        r = client.post("/api/presupuestos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "items": [
+                {"descripcion": "Bolsas", "cantidad": 2000, "precio_unitario": 265},
+                {"descripcion": "Cajas", "cantidad": 5000, "precio_unitario": 100},
+            ],
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) == 2
+        # total = 2000*265 + 5000*100 = 530000 + 500000 = 1.030.000
+        assert Decimal(str(data["total"])) == Decimal("1030000.00")
+        # total por ítem
+        assert Decimal(str(data["items"][0]["total"])) == Decimal("530000.00")
+
+    def test_un_presupuesto_sin_items_es_rechazado(self, client, db):
+        cliente = crear_cliente(db)
+        r = client.post("/api/presupuestos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "items": [],
+        })
+        assert r.status_code == 422
+
+    def test_convertir_crea_un_trabajo_por_item(self, client, db):
+        cliente = crear_cliente(db)
+        p = crear_presupuesto(db, cliente, items=[
+            {"descripcion": "Bolsas", "cantidad": 2000, "precio_unitario": Decimal("265")},
+            {"descripcion": "Cajas", "cantidad": 5000, "precio_unitario": Decimal("100")},
+        ])
+
+        r = client.post(f"/api/presupuestos/{p.id}/convertir")
+
+        assert r.status_code == 200
+        trabajos = r.json()
+        assert len(trabajos) == 2
+        precios = {Decimal(str(t["precio_venta"])) for t in trabajos}
+        assert precios == {Decimal("530000"), Decimal("500000")}
+        # Cada ítem quedó vinculado a su trabajo.
+        db.refresh(p)
+        assert all(item.trabajo_id for item in p.items)
+
+    def test_cada_item_descuenta_su_propio_papel(self, client, db):
+        # Dos ítems con papeles distintos: al imprimir cada orden se descuenta
+        # del artículo correcto, no de uno solo.
+        cliente = crear_cliente(db)
+        papel_a = crear_papel(db, nombre="Kraft", cantidad=Decimal("500"))
+        papel_b = crear_papel(db, nombre="Triplex", cantidad=Decimal("300"))
+        p = crear_presupuesto(db, cliente, items=[
+            {"descripcion": "Bolsas", "cantidad": 2000, "precio_unitario": Decimal("265"),
+             "papel_id": papel_a.id, "cantidad_pliegos": Decimal("100")},
+            {"descripcion": "Cajas", "cantidad": 5000, "precio_unitario": Decimal("100"),
+             "papel_id": papel_b.id, "cantidad_pliegos": Decimal("50")},
+        ])
+
+        trabajos = client.post(f"/api/presupuestos/{p.id}/convertir").json()
+        for t in trabajos:
+            client.post(f"/api/trabajos/{t['id']}/imprimir-orden")
+
+        db.refresh(papel_a)
+        db.refresh(papel_b)
+        assert papel_a.cantidad == Decimal("400.000")
+        assert papel_b.cantidad == Decimal("250.000")
+
+    def test_no_se_puede_asociar_a_trabajo_existente_con_varios_items(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+        r = client.post("/api/presupuestos/", json={
+            "cliente_id": cliente.id, "fecha_creacion": str(date.today()),
+            "trabajo_asociado_id": trabajo.id,
+            "items": [
+                {"descripcion": "Bolsas", "cantidad": 2000, "precio_unitario": 265},
+                {"descripcion": "Cajas", "cantidad": 5000, "precio_unitario": 100},
+            ],
+        })
+        assert r.status_code == 400

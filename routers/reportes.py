@@ -60,7 +60,14 @@ def dashboard(filtro: str = "este_mes", db: Session = Depends(get_db)):
     cheques = db.query(models.Cheque).all()
     gastos = db.query(models.Gasto).all()
 
-    ids_con_presupuesto = {p.trabajo_id for p in presupuestos if p.trabajo_id}
+    # Trabajos que tienen un presupuesto asociado: el vínculo vive en cada ítem
+    # (un presupuesto tiene varios ítems, cada ítem convertido es un trabajo).
+    ids_con_presupuesto = {
+        item.trabajo_id
+        for p in presupuestos
+        for item in p.items
+        if item.trabajo_id
+    }
 
     ingresos = ingresos_reales(movimientos, cheques, en_periodo)
     sin_imputar = ingresos_sin_imputar(movimientos, cheques, en_periodo)

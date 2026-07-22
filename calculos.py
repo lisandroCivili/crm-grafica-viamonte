@@ -287,13 +287,18 @@ def ganancia_bruta_realizada(
     en su presupuesto (ver fraccion_ganancia_efectiva).
     Un trabajo sin presupuesto asociado no aporta ganancia (su cobro sí es ingreso).
 
-    El costo se toma del presupuesto y no de Trabajo.costo_total_materiales
-    porque un trabajo cargado a mano y vinculado a un presupuesto después tiene
-    ese campo en cero, lo que daría una ganancia del 100%.
+    El costo y el margen se toman del ÍTEM del presupuesto que originó cada
+    trabajo (un presupuesto tiene varios ítems, y cada ítem convertido es un
+    trabajo), no de Trabajo.costo_total_materiales, porque un trabajo cargado a
+    mano y vinculado después tiene ese campo en cero, lo que daría una ganancia
+    del 100%. El margen del ítem es opcional: si no se cargó, se toma como 0
+    (precio directo sin costo conocido, no aporta ganancia calculable).
     """
     datos_por_trabajo = {
-        p.trabajo_id: (p.margen_ganancia, p.costo_materiales)
-        for p in presupuestos if p.trabajo_id
+        item.trabajo_id: (item.margen_ganancia or Decimal("0"), item.costo_materiales)
+        for p in presupuestos
+        for item in p.items
+        if item.trabajo_id
     }
     precio_por_trabajo = {t.id: t.precio_venta for t in trabajos}
 

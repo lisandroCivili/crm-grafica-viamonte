@@ -227,8 +227,8 @@ def listar_trabajos(estado: str = None, sin_presupuesto: bool = False, db: Sessi
     if sin_presupuesto:
         ids_con_presupuesto = {
             row[0]
-            for row in db.query(models.Presupuesto.trabajo_id)
-            .filter(models.Presupuesto.trabajo_id.isnot(None))
+            for row in db.query(models.ItemPresupuesto.trabajo_id)
+            .filter(models.ItemPresupuesto.trabajo_id.isnot(None))
             .all()
         }
         trabajos = [t for t in trabajos if t.id not in ids_con_presupuesto]
@@ -289,11 +289,13 @@ def actualizar_trabajo(
     if trabajo_update.estado == "Cancelado" and devolver_papel:
         _devolver_papel(db, db_trabajo)
 
-    # Sincronizar el estado con su Presupuesto madre
+    # Sincronizar el estado con su Presupuesto madre (a través del ítem que
+    # originó este trabajo). Con varios trabajos por presupuesto el estado de
+    # cabecera es informativo: refleja el último trabajo que cambió.
     if trabajo_update.estado:
-        db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
-        if db_presupuesto:
-            db_presupuesto.estado = trabajo_update.estado
+        db_item = db.query(models.ItemPresupuesto).filter(models.ItemPresupuesto.trabajo_id == trabajo_id).first()
+        if db_item:
+            db_item.presupuesto.estado = trabajo_update.estado
 
     db.commit()
     db.refresh(db_trabajo)
@@ -309,7 +311,7 @@ def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
     if tiene_movimientos:
         raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene pagos registrados. Cancelalo en su lugar.")
 
-    tiene_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
+    tiene_presupuesto = db.query(models.ItemPresupuesto).filter(models.ItemPresupuesto.trabajo_id == trabajo_id).first()
     if tiene_presupuesto:
         raise HTTPException(status_code=400, detail="No se puede eliminar: hay un presupuesto convertido a este trabajo.")
 
@@ -387,10 +389,11 @@ def iniciar_diseno(trabajo_id: str, datos: schemas.IniciarDisenoRequest, db: Ses
     if not db_trabajo.fecha_comienzo:
         db_trabajo.fecha_comienzo = date.today()
 
-    # Mismo criterio que el PUT: el presupuesto madre sigue el estado del trabajo.
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.trabajo_id == trabajo_id).first()
-    if db_presupuesto:
-        db_presupuesto.estado = "En Diseño"
+    # Mismo criterio que el PUT: el presupuesto madre sigue el estado del trabajo
+    # (a través del ítem que originó este trabajo).
+    db_item = db.query(models.ItemPresupuesto).filter(models.ItemPresupuesto.trabajo_id == trabajo_id).first()
+    if db_item:
+        db_item.presupuesto.estado = "En Diseño"
 
     db.commit()
     db.refresh(db_trabajo)

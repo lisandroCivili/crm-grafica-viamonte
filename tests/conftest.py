@@ -20,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 import models
 from database import Base, get_db
+from money import Q2
 
 
 @pytest.fixture
@@ -136,15 +137,46 @@ def crear_cheque(db, cliente, trabajo=None, **overrides):
     return cheque
 
 
-def crear_presupuesto(db, cliente=None, **overrides):
-    """cliente es opcional: un presupuesto puede ser un borrador sin cliente."""
+def crear_item(db, presupuesto, **overrides):
+    """Agrega un ItemPresupuesto a un presupuesto ya creado y lo commitea."""
     datos = dict(
-        cliente_id=cliente.id if cliente else None,
+        presupuesto_id=presupuesto.id,
+        orden=len(presupuesto.items),
         descripcion="Volantes A5",
         cantidad=1000,
+        precio_unitario=Decimal("30"),
         costo_materiales=Decimal("20000"),
         margen_ganancia=Decimal("50"),
-        precio_final=Decimal("30000"),
+    )
+    datos.update(overrides)
+    item = models.ItemPresupuesto(**datos)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def crear_presupuesto(db, cliente=None, items=None, **overrides):
+    """Crea un presupuesto con sus ítems. cliente es opcional (borrador).
+
+    Retrocompatible: los kwargs de producto/papel/costos que antes vivían en el
+    presupuesto (descripcion, cantidad, precio_final, costo_materiales,
+    margen_ganancia, detalles_costos, material, gramaje, papel_id,
+    cantidad_pliegos) se enrutan a un ÚNICO ítem. precio_final se traduce a
+    precio_unitario dividiendo por la cantidad, que es como quedaba antes en el
+    PDF. Para varios ítems, pasar items=[dict(...), ...].
+    """
+    # Campos que ahora viven en el ítem, no en la cabecera. precio_final es un
+    # alias histórico que se traduce a precio_unitario más abajo.
+    CAMPOS_ITEM = {
+        "descripcion", "cantidad", "precio_unitario", "precio_final",
+        "costo_materiales", "margen_ganancia", "detalles_costos", "material",
+        "gramaje", "papel_id", "cantidad_pliegos",
+    }
+    item_overrides = {k: overrides.pop(k) for k in list(overrides) if k in CAMPOS_ITEM}
+
+    datos = dict(
+        cliente_id=cliente.id if cliente else None,
         estado="Borrador",
         fecha_creacion=date.today(),
     )
@@ -152,5 +184,21 @@ def crear_presupuesto(db, cliente=None, **overrides):
     presupuesto = models.Presupuesto(**datos)
     db.add(presupuesto)
     db.commit()
+    db.refresh(presupuesto)
+
+    if items is None:
+        # Un único ítem por defecto, con los overrides retrocompatibles.
+        cantidad = item_overrides.get("cantidad", 1000)
+        if "precio_unitario" not in item_overrides:
+            # precio_final histórico -> precio_unitario, como hacía el PDF.
+            precio_final = item_overrides.pop("precio_final", Decimal("30000"))
+            item_overrides["precio_unitario"] = Q2(Decimal(str(precio_final)) / cantidad) if cantidad else Decimal(str(precio_final))
+        else:
+            item_overrides.pop("precio_final", None)
+        items = [item_overrides]
+
+    for item_datos in items:
+        crear_item(db, presupuesto, **item_datos)
+
     db.refresh(presupuesto)
     return presupuesto
