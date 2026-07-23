@@ -274,6 +274,14 @@ async function abrirFicha(id) {
                 ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>'
                 : `<span style="color:var(--red); font-weight:600;">Debe: $${fmtMoney(saldoTrabajo)}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${fmtMoney(pagosDeEsteTrabajo)})</span>`;
 
+            // El trabajo debe plata y el cliente tiene saldo a favor (saldo < 0):
+            // se ofrece cubrirlo con ese crédito sin cargar un pago nuevo.
+            const puedeAplicarSaldoFavor = saldoTrabajo > 0 && saldoReal < 0
+                && t.estado !== 'Cancelado';
+            const btnSaldoFavor = puedeAplicarSaldoFavor
+                ? `<button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--green); color:var(--green);" onclick="aplicarSaldoFavor('${t.id}')">💰 Aplicar saldo a favor</button>`
+                : '';
+
             divTrabajos.innerHTML += `
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
@@ -290,6 +298,7 @@ async function abrirFicha(id) {
                         <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${esc(t.notas_iniciales) || 'Ninguna'}</p>
                         <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}')">✏️ Editar Trabajo</button>
                         <button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--red); color:var(--red);" onclick="eliminarTrabajo('${t.id}', this)">🗑️ Borrar</button>
+                        ${btnSaldoFavor}
                     </div>
                 </div>
             `;
@@ -332,6 +341,39 @@ async function abrirFicha(id) {
 
     } catch (error) {
         console.error("Error al cargar la ficha:", error);
+    }
+}
+
+// Cubre el saldo pendiente de un trabajo con el saldo a favor del cliente. El
+// backend re-imputa los pagos existentes (no crea plata): ver routers/trabajos.py.
+async function aplicarSaldoFavor(id) {
+    const confirma = await Swal.fire({
+        title: 'Aplicar saldo a favor',
+        text: 'Se usará el saldo a favor del cliente para cubrir este trabajo. ¿Confirmás?',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Aplicar',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirma.isConfirmed) return;
+
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}/aplicar-saldo-favor`, { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(detalleError(data, 'No se pudo aplicar el saldo a favor.'));
+
+        const restante = Number(data.saldo_pendiente_restante);
+        await Swal.fire(
+            'Saldo aplicado',
+            `Se aplicaron $${fmtMoney(data.monto_aplicado)} al trabajo.` +
+            (restante > 0
+                ? ` Todavía debe $${fmtMoney(restante)}.`
+                : ' El trabajo quedó pago.'),
+            'success'
+        );
+        refrescarTablero();
+    } catch (error) {
+        Swal.fire('No se pudo aplicar el saldo a favor', error.message, 'error');
     }
 }
 
@@ -1469,7 +1511,7 @@ function renderItemPresupuesto(datos = {}) {
     const costos = datos.detalles_costos || {};
     const filasCostos = LISTA_COSTOS.map(c => {
         const val = (costos[c] != null) ? costos[c] : '';
-        return `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${esc(c)}" value="${val}" placeholder="0" onfocus="if(this.value=='0')this.value=''"></div>`;
+        return `<div class="costo-row"><label>${c}</label><input type="number" class="input-costo" data-nombre="${esc(c)}" value="${val}" placeholder="0" oninput="recalcularPrecioItem(this)" onfocus="if(this.value=='0')this.value=''"></div>`;
     }).join('');
 
     return `
@@ -1489,7 +1531,7 @@ function renderItemPresupuesto(datos = {}) {
             <div style="flex:1;">
                 <label style="font-size:12px; color:var(--muted);">Cantidad</label>
                 <input type="number" class="item-cantidad" value="${datos.cantidad != null ? datos.cantidad : 1}" min="1" required
-                       oninput="calcularModal()"
+                       oninput="recalcularPrecioItem(this)"
                        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
             </div>
             <div style="flex:1;">
@@ -1536,16 +1578,26 @@ function renderItemPresupuesto(datos = {}) {
             </div>
         </div>
 
-        <!-- Costos internos opcionales: alimentan la hoja de costos, no el precio. -->
-        <details style="margin-bottom: 5px;">
-            <summary style="cursor:pointer; font-size:12px; color:var(--muted);">Costos internos (opcional)</summary>
+        <!-- Costos internos + margen: cargados acá, autocalculan el Precio unitario
+             de arriba (costos × (1 + margen%) ÷ cantidad). El operador puede pisar
+             ese precio a mano para redondear; tocar un costo o el margen lo recalcula. -->
+        <details style="margin-bottom: 5px;" ${Object.keys(costos).length ? 'open' : ''}>
+            <summary style="cursor:pointer; font-size:12px; color:var(--muted);">Costos internos y ganancia</summary>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
                 ${filasCostos}
             </div>
-            <div style="margin-top:10px;">
-                <label style="font-size:12px; color:var(--muted);">% de ganancia (informativo)</label>
-                <input type="number" class="item-margen" placeholder="Ej: 35" value="${datos.margen_ganancia != null ? datos.margen_ganancia : ''}"
-                       style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+            <div style="display:flex; gap:12px; margin-top:10px; align-items:flex-end;">
+                <div style="flex:1;">
+                    <label style="font-size:12px; color:var(--muted);">% de ganancia</label>
+                    <input type="number" class="item-margen" step="0.01" min="0" placeholder="Ej: 35" value="${datos.margen_ganancia != null ? datos.margen_ganancia : ''}"
+                           oninput="recalcularPrecioItem(this)"
+                           style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px;">
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:12px; color:var(--muted);">Costo total del producto</label>
+                    <input type="text" class="item-costo-total" readonly value="$ 0"
+                           style="width:100%; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg, #f7f7f7); color:var(--muted);">
+                </div>
             </div>
         </details>
     </div>`;
@@ -1567,6 +1619,8 @@ async function agregarItemPresupuesto(datos = {}) {
             tarjeta.querySelector('.item-cantidad-pliegos').value = datos.cantidad_pliegos;
         }
     }
+    // Muestra el costo total precargado sin pisar el precio unitario ya guardado.
+    refrescarCostoTotalItem(tarjeta);
     calcularModal();
 }
 
@@ -1642,16 +1696,82 @@ function cerrarModalPresupuesto() {
 // Recalcula el total de cada ítem (cantidad × precio unitario) y el total del
 // presupuesto (suma de los ítems). Preview en vivo; el valor definitivo lo
 // guarda el backend (Decimal).
+// Autocalcula el Precio unitario de un ítem a partir de sus costos y su margen:
+//   costo_total = suma de los costos cargados
+//   precio_total = costo_total * (1 + margen/100)
+//   precio_unitario = precio_total / cantidad
+// Se dispara al tocar un costo o el margen (no al tipear el precio a mano: eso lo
+// deja libre para redondear, y sólo se pierde si después se vuelve a tocar la
+// calculadora). 'origen' es el input que disparó el evento; se usa sólo para
+// ubicar la tarjeta.
+// Suma de los costos internos de una tarjeta (costo total del producto).
+function _costoTotalItem(tarjeta) {
+    let total = 0;
+    tarjeta.querySelectorAll('.input-costo').forEach(inp => {
+        total += parseFloat(inp.value) || 0;
+    });
+    return total;
+}
+
+function recalcularPrecioItem(origen) {
+    const tarjeta = origen.closest('.item-presupuesto');
+    if (!tarjeta) return;
+
+    const costoTotal = _costoTotalItem(tarjeta);
+    const margen = parseFloat(tarjeta.querySelector('.item-margen').value) || 0;
+    const cantidad = parseInt(tarjeta.querySelector('.item-cantidad').value) || 1;
+
+    tarjeta.querySelector('.item-costo-total').value = `$ ${fmtMoney(costoTotal)}`;
+
+    // Sin costos cargados no hay precio que calcular: se respeta lo que el
+    // operador haya puesto a mano en el Precio unitario.
+    if (costoTotal > 0) {
+        const precioUnitario = (costoTotal * (1 + margen / 100)) / cantidad;
+        // 2 decimales para no arrastrar la basura del float; el backend recuantiza.
+        tarjeta.querySelector('.item-precio-unitario').value = precioUnitario.toFixed(2);
+    }
+
+    calcularModal();
+}
+
+// Refresca el label de costo total de una tarjeta SIN tocar el Precio unitario.
+// Se usa al precargar (editar/duplicar): el precio ya viene guardado y aprobado,
+// no hay que recalcularlo, sólo mostrar el costo.
+function refrescarCostoTotalItem(tarjeta) {
+    tarjeta.querySelector('.item-costo-total').value = `$ ${fmtMoney(_costoTotalItem(tarjeta))}`;
+}
+
 function calcularModal() {
     let total = 0;
+    let costoTotal = 0;
+    let hayCostos = false;
     document.querySelectorAll('.item-presupuesto').forEach(tarjeta => {
         const cantidad = parseInt(tarjeta.querySelector('.item-cantidad').value) || 0;
         const precioUnit = parseFloat(tarjeta.querySelector('.item-precio-unitario').value) || 0;
         const totalItem = cantidad * precioUnit;
         tarjeta.querySelector('.item-total').value = `$ ${fmtMoney(totalItem)}`;
         total += totalItem;
+
+        // Ganancia = precio total − costo total, sumada sobre los ítems que
+        // tienen costos cargados (los demás no aportan al cálculo de ganancia).
+        const costoItem = _costoTotalItem(tarjeta);
+        if (costoItem > 0) {
+            hayCostos = true;
+            costoTotal += costoItem;
+        }
     });
     document.getElementById('lbl-m-total').innerText = `$ ${fmtMoney(total)}`;
+
+    // Ganancia neta = suma de precios − suma de costos. Sólo se muestra si al
+    // menos un ítem cargó costos; sin costos no hay ganancia que estimar.
+    const fila = document.getElementById('lbl-m-ganancia-row');
+    if (hayCostos) {
+        const ganancia = total - costoTotal;
+        document.getElementById('lbl-m-ganancia').innerText = `$ ${fmtMoney(ganancia)}`;
+        fila.style.display = 'flex';
+    } else {
+        fila.style.display = 'none';
+    }
 }
 
 // AGREGAR ESTA FUNCIÓN NUEVA
@@ -1730,13 +1850,22 @@ function recolectarItemsDelModal() {
             return null;
         }
 
-        // Costos internos opcionales de este ítem.
+        // Costos internos de este ítem.
         const detalles = {};
         tarjeta.querySelectorAll('.input-costo').forEach(inp => {
             const val = parseFloat(inp.value) || 0;
             if (val > 0) detalles[inp.getAttribute('data-nombre')] = val;
         });
         const margen = parseFloat(tarjeta.querySelector('.item-margen').value);
+
+        // Si el ítem carga costos, el % de ganancia es obligatorio: es lo que
+        // convierte el costo en precio. Sin costos (precio puesto a mano) no
+        // aplica y queda en null.
+        const tieneCostos = Object.keys(detalles).length > 0;
+        if (tieneCostos && !Number.isFinite(margen)) {
+            Swal.fire('Falta el % de ganancia', `Producto ${i + 1}: cargaste costos, indicá el % de ganancia para calcular el precio.`, 'warning');
+            return null;
+        }
 
         items.push({
             descripcion,
@@ -1904,7 +2033,7 @@ async function cargarPresupuestos() {
                     </td>
                     <td class="tnum" style="color:var(--magenta); font-weight:bold;">$ ${fmtMoney(p.total)}</td>
                     <td>${estadoBadge}</td>
-                    <td style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
+                    <td style="display:flex; gap:5px; justify-content:center; flex-wrap:nowrap; white-space:nowrap;">
                         ${btnConvertir}
                         ${btnesEdicion}
                         <button class="btn secondary" style="font-size:12px; padding:6px;" onclick="duplicarPresupuesto('${p.id}')">Duplicar</button>
@@ -2031,102 +2160,33 @@ async function armarMoldeBasePDF(presupuesto_id) {
     return { p, c };
 }
 
-// Helpers de fecha/nombre para los PDF (fecha_creacion viene como 'YYYY-MM-DD';
-// se parsea a mano para no depender del huso horario).
-function fmtFechaAR(iso) {
-    if (!iso) return '';
-    const [y, m, d] = String(iso).split('-');
-    return `${d}/${m}/${y}`;
-}
-function fmtFechaArchivo(iso) {
-    if (!iso) return new Date().toISOString().split('T')[0].split('-').reverse().join('-');
-    const [y, m, d] = String(iso).split('-');
-    return `${d}-${m}-${y}`;
-}
-function sanitizarNombreArchivo(txt) {
-    return (txt || 'SinCliente').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SinCliente';
-}
-
 // 1. PDF PARA EL CLIENTE (formal, formato Gráfica Viamonte)
-// NOTA: pendiente de migrar al backend (Etapa B). Por ahora sigue en el
-// frontend, pero ya itera los ítems del presupuesto (una fila por producto).
+// El PDF se arma en el backend con ReportLab (Etapa B): acá sólo se pide el
+// endpoint y se dispara la descarga del archivo. El nombre viene en el header
+// Content-Disposition; si por algo no llega, se arma uno con el id como fallback.
 async function generarPDFCliente(presupuesto_id) {
-    const { p, c } = await armarMoldeBasePDF(presupuesto_id);
-    const nombreCliente = c ? c.nombre_completo : 'Sin cliente';
-    const fecha = fmtFechaAR(p.fecha_creacion);
-    const items = p.items || [];
-    const total = items.reduce((acc, it) => acc + (Number(it.cantidad) * Number(it.precio_unitario)), 0);
+    try {
+        const resp = await fetch(`${API_URL}/presupuestos/${presupuesto_id}/pdf-cliente`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "No se pudo generar el PDF.");
+        }
 
-    const filas = items.map(it => {
-        const totalItem = Number(it.cantidad) * Number(it.precio_unitario);
-        return `
-                    <tr>
-                        <td style="border:1px solid #ccc; padding:10px; word-break:break-word; white-space:pre-wrap;">${esc(it.descripcion)}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:center;">${it.cantidad}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:right;">${fmtMoney(it.precio_unitario)}</td>
-                        <td style="border:1px solid #ccc; padding:10px; text-align:right; font-weight:bold;">${fmtMoney(totalItem)}</td>
-                    </tr>`;
-    }).join('');
+        const dispo = resp.headers.get('Content-Disposition') || '';
+        const match = dispo.match(/filename="?([^"]+)"?/);
+        const nombreArchivo = match ? match[1] : `Presupuesto_${presupuesto_id.substring(0, 6).toUpperCase()}.pdf`;
 
-    const div = document.createElement('div');
-    div.style.fontFamily = 'Arial, sans-serif';
-    div.style.color = '#000';
-    div.style.width = '794px';
-    div.innerHTML = `
-        <!-- HEADER: barra negra ancho completo + cola triangular a la izq (medido del PDF real) -->
-        <div style="position:relative; width:100%; height:179px; background:#111;
-                    clip-path:polygon(0 0, 100% 0, 100% 70%, 44.5% 70%, 38.4% 100%, 0 100%);">
-            <img src="assets/logo-presupuesto-cl.png"
-                 style="position:absolute; top:18px; left:40px; height:95px;">
-            <span style="position:absolute; top:48px; right:40px;
-                         font-size:34px; font-weight:800; color:#fff; letter-spacing:1px;">PRESUPUESTO</span>
-        </div>
-
-        <div style="padding:0 40px;">
-            <div style="text-align:left; margin-top:20px; font-size:13px;">
-                <p style="margin:4px 0;">Fecha de emisión: ${fecha} - S.M. de Tucumán.</p>
-                <p style="margin:4px 0;">Cliente: ${esc(nombreCliente)}</p>
-            </div>
-
-            <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:13px;">
-                <thead>
-                    <tr>
-                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:left;">Producto</th>
-                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:center; width:90px;">Cantidad</th>
-                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:right; width:110px;">Precio Unitario</th>
-                        <th style="background:#eee; border:1px solid #ccc; padding:10px; text-align:right; width:110px;">Precio Total</th>
-                    </tr>
-                </thead>
-                <tbody>${filas}
-                </tbody>
-            </table>
-
-            <div style="display:flex; justify-content:flex-end; margin-top:15px;">
-                <div style="border:2px solid #111; padding:10px 18px;">
-                    <span style="font-size:18px; font-weight:bold;">TOTAL: $ ${fmtMoney(total)}</span>
-                </div>
-            </div>
-
-            <div style="text-align:center; margin-top:80px;">
-                <img src="assets/firma-facu.png" style="height:90px;">
-                <p style="margin:4px 0; font-weight:bold; font-size:13px;">Grafica Viamonte</p>
-                <p style="margin:2px 0; font-size:12px;">de Soria Daniel Enrique</p>
-            </div>
-        </div>
-
-        <div style="text-align:center; margin-top:30px; font-size:11px; color:#555;">
-            igv.srl@hotmail.com &nbsp;|&nbsp; WhatsApp: +54 381 239-4798
-        </div>
-    `;
-
-    const nombreArchivo = `Presupuesto_${sanitizarNombreArchivo(nombreCliente)}_${fmtFechaArchivo(p.fecha_creacion)}.pdf`;
-    document.body.appendChild(div);
-
-    const imgs = Array.from(div.querySelectorAll('img'));
-    await Promise.all(imgs.map(img => img.complete ? Promise.resolve() :
-        new Promise(res => { img.onload = res; img.onerror = res; })));
-
-    html2pdf().set({ margin: 0, filename: nombreArchivo }).from(div).save().then(() => div.remove());
+        const blob = await resp.blob();
+        const enlace = document.createElement('a');
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        URL.revokeObjectURL(enlace.href);
+    } catch (error) {
+        Swal.fire('No se pudo generar el PDF', error.message, 'error');
+    }
 }
 
 // 2. PDF INTERNO (Detalle de todos los costos e ítems del formulario)
@@ -2149,8 +2209,10 @@ async function generarPDFInterno(presupuesto_id) {
         }
         if (!filasCostos) filasCostos = `<tr><td colspan="2" style="border:1px solid #ddd; padding:8px; color:#999;">Sin costos cargados</td></tr>`;
 
+        // page-break-inside: avoid evita que un producto se corte a la mitad al
+        // pasar de página; el bloque entero salta a la hoja siguiente.
         return `
-        <div style="margin-top:18px;">
+        <div style="margin-top:18px; page-break-inside:avoid; break-inside:avoid;">
             <p style="font-size:13px; margin:2px 0;"><b>Producto ${idx + 1}:</b> ${it.cantidad}x ${esc(it.descripcion)}</p>
             <p style="font-size:13px; margin:2px 0;"><b>Material:</b> ${esc(it.material) || '-'} &nbsp;|&nbsp; <b>Gramaje:</b> ${it.gramaje ? esc(it.gramaje) + ' g/m²' : '-'}</p>
             <p style="font-size:13px; margin:2px 0;"><b>Precio unitario:</b> $ ${fmtMoney(it.precio_unitario)} &nbsp;|&nbsp; <b>Total:</b> $ ${fmtMoney(totalItem)}</p>
@@ -2158,7 +2220,7 @@ async function generarPDFInterno(presupuesto_id) {
                 <tr style="background:#eee;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Ítem de Costo</th><th style="border:1px solid #ddd; padding:8px; text-align:right;">Monto</th></tr>
                 ${filasCostos}
                 <tr style="background:#ffe6f2;"><td style="border:1px solid #ddd; padding:8px;"><b>SUBTOTAL COSTOS</b></td><td style="border:1px solid #ddd; padding:8px; text-align:right;"><b>$ ${fmtMoney(costo)}</b></td></tr>
-                <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia estimada${it.margen_ganancia != null ? ` (${it.margen_ganancia}% informativo)` : ''}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(totalItem - costo)}</td></tr>
+                <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia estimada${it.margen_ganancia != null ? ` (${it.margen_ganancia}%)` : ''}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(totalItem - costo)}</td></tr>
             </table>
         </div>`;
     }).join('');
@@ -2171,7 +2233,13 @@ async function generarPDFInterno(presupuesto_id) {
         ${secciones}
         <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $ ${fmtMoney(totalPresupuesto)}</h3>
     `;
-    html2pdf().set({ margin: 10, filename: `Costos_Internos_${shortId}.pdf` }).from(div).save();
+    // pagebreak avoid-all + css: respeta el page-break-inside:avoid de cada
+    // producto para no cortar un bloque por la mitad entre páginas.
+    html2pdf().set({
+        margin: 10,
+        filename: `Costos_Internos_${shortId}.pdf`,
+        pagebreak: { mode: ['avoid-all', 'css'] },
+    }).from(div).save();
 }
 
 // Informe general de trabajos a clientes. Se arma desde los presupuestos

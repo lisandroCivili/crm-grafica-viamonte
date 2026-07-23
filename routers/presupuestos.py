@@ -1,13 +1,15 @@
+import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from calculos import sumar_detalles_costos, calcular_saldo_trabajo
 from money import Q2
+from presupuesto_pdf import construir_presupuesto_pdf
 # El papel del presupuesto se valida con las mismas reglas que el del trabajo
 # (que exista, que se mida en pliegos, que la cantidad sea un entero positivo y
 # que papel y pliegos vayan juntos). Se importa en vez de duplicarla para que no
@@ -203,6 +205,38 @@ def informe_trabajos(db: Session = Depends(get_db)):
             ))
 
     return filas
+
+
+def _nombre_archivo_pdf(presupuesto: models.Presupuesto) -> str:
+    """Nombre de descarga: Presupuesto_<Cliente>_<dd-mm-aaaa>.pdf.
+
+    Sanitiza el nombre del cliente igual que el frontend (sólo alfanumérico,
+    lo demás a '_') para que sirva de nombre de archivo en cualquier sistema.
+    """
+    cliente = presupuesto.cliente
+    crudo = cliente.nombre_completo if cliente else "SinCliente"
+    limpio = re.sub(r"[^a-zA-Z0-9]+", "_", crudo).strip("_") or "SinCliente"
+    fecha = presupuesto.fecha_creacion.strftime("%d-%m-%Y") if presupuesto.fecha_creacion else date.today().strftime("%d-%m-%Y")
+    return f"Presupuesto_{limpio}_{fecha}.pdf"
+
+
+@router.get("/{presupuesto_id}/pdf-cliente")
+def pdf_cliente(presupuesto_id: str, db: Session = Depends(get_db)):
+    """Genera el PDF del presupuesto para el cliente (mismo patrón que la orden).
+
+    Trae el presupuesto con sus ítems + cliente y devuelve el PDF armado en el
+    backend con ReportLab. Reemplaza al armado con html2pdf del frontend.
+    """
+    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
+    if not db_presupuesto:
+        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+
+    pdf = construir_presupuesto_pdf(db_presupuesto, db_presupuesto.cliente)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_nombre_archivo_pdf(db_presupuesto)}"'},
+    )
 
 
 @router.put("/{presupuesto_id}", response_model=schemas.PresupuestoResponse)

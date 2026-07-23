@@ -348,3 +348,44 @@ class TestPresupuestoMultiItem:
             ],
         })
         assert r.status_code == 400
+
+
+class TestPDFCliente:
+    """El PDF del cliente se arma en el backend con ReportLab (Etapa B). El
+    endpoint no valida reglas de negocio: sirve cualquier presupuesto existente,
+    incluido un borrador sin cliente. Sólo se verifica el contrato de descarga.
+    """
+
+    def test_devuelve_un_pdf(self, client, db):
+        cliente = crear_cliente(db)
+        p = crear_presupuesto(db, cliente, items=[
+            {"descripcion": "Bolsas", "cantidad": 2000, "precio_unitario": Decimal("265")},
+            {"descripcion": "Cajas", "cantidad": 5000, "precio_unitario": Decimal("100")},
+        ])
+
+        r = client.get(f"/api/presupuestos/{p.id}/pdf-cliente")
+
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert r.content.startswith(b"%PDF")
+        assert "attachment" in r.headers["content-disposition"]
+
+    def test_el_nombre_de_archivo_usa_el_cliente(self, client, db):
+        cliente = crear_cliente(db, nombre_completo="Juan Calafat")
+        p = crear_presupuesto(db, cliente)
+
+        r = client.get(f"/api/presupuestos/{p.id}/pdf-cliente")
+
+        assert "Presupuesto_Juan_Calafat_" in r.headers["content-disposition"]
+
+    def test_un_borrador_sin_cliente_tambien_genera_pdf(self, client, db):
+        p = crear_presupuesto(db)  # Sin cliente asignado.
+
+        r = client.get(f"/api/presupuestos/{p.id}/pdf-cliente")
+
+        assert r.status_code == 200
+        assert r.content.startswith(b"%PDF")
+
+    def test_presupuesto_inexistente_da_404(self, client, db):
+        r = client.get("/api/presupuestos/no-existe/pdf-cliente")
+        assert r.status_code == 404

@@ -202,6 +202,14 @@ class IniciarDisenoRequest(BaseModel):
         return self
 
 
+# Resultado de aplicar el saldo a favor del cliente a un trabajo. No lleva request:
+# el monto lo determina el backend (mínimo entre lo que falta del trabajo y el
+# crédito disponible del cliente). Ver routers/trabajos.py._aplicar_saldo_favor.
+class AplicarSaldoFavorResponse(BaseModel):
+    monto_aplicado: Decimal
+    saldo_pendiente_restante: Decimal
+
+
 # --- ESQUEMAS PARA PRESUPUESTOS ---
 # Un presupuesto tiene UNO O VARIOS ítems (productos). Cada ítem lleva su precio
 # unitario, que es lo que ve el cliente; los costos y el margen son opcionales y

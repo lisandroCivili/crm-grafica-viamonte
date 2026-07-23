@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from datetime import date, datetime, timezone
-from money import Q3
+from money import Q2, Q3
+from calculos import calcular_saldo_trabajo
 from orden_pdf import construir_orden_pdf
 
 router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
@@ -197,6 +198,175 @@ def _devolver_papel(db: Session, db_trabajo: models.Trabajo):
     articulo.cantidad = Q3(articulo.cantidad + pliegos)
     articulo.ultima_actualizacion = date.today()
     db_trabajo.papel_devuelto = True
+
+
+def _aplicar_saldo_favor(db: Session, db_trabajo: models.Trabajo) -> tuple[Decimal, Decimal]:
+    """Cubre el saldo pendiente de un trabajo con el saldo a favor del cliente.
+
+    El saldo a favor (la seña de un trabajo cancelado, un pago a cuenta sin
+    imputar) ya es plata real: existe como Movimiento/Cheque. Crear un pago nuevo
+    para "abonar" el trabajo la DUPLICARÍA (inflaría los ingresos y volvería a
+    dejar el saldo del cliente en negativo). Por eso acá NO se crea plata: se
+    RE-IMPUTAN esos pagos a este trabajo (se cambia su trabajo_id) y, si un pago
+    es más grande que lo que falta cubrir, se PARTE: la porción que cubre el
+    trabajo se imputa acá y el resto sigue como saldo a favor suelto.
+
+    Re-imputar y partir preservan total_pagado y total_facturado del cliente, así
+    que su saldo neto y los ingresos por período quedan idénticos: sólo cambia a
+    qué trabajo está atribuida la plata.
+
+    No hace commit: lo hace el endpoint. Devuelve (monto_aplicado, saldo_restante).
+
+    Limitaciones (v1): sólo se toma como crédito la plata sin imputar o de
+    trabajos cancelados (no la sobre-paga de un trabajo vivo); los cheques sólo se
+    re-imputan enteros (un cheque es un documento físico, no se parte).
+    """
+    movimientos_cliente = (
+        db.query(models.Movimiento)
+        .filter(models.Movimiento.cliente_id == db_trabajo.cliente_id)
+        .all()
+    )
+    cheques_cliente = (
+        db.query(models.Cheque)
+        .filter(models.Cheque.cliente_id == db_trabajo.cliente_id)
+        .all()
+    )
+
+    movs_del_trabajo = [m for m in movimientos_cliente if m.trabajo_id == db_trabajo.id]
+    cheques_del_trabajo = [ch for ch in cheques_cliente if ch.trabajo_id == db_trabajo.id]
+    saldo_pendiente = calcular_saldo_trabajo(
+        db_trabajo.precio_venta, movs_del_trabajo, cheques_del_trabajo
+    )
+    if saldo_pendiente <= Decimal("0"):
+        raise HTTPException(
+            status_code=400,
+            detail="El trabajo ya está pago: no hay saldo pendiente que cubrir.",
+        )
+
+    # Trabajos cancelados del cliente: la plata imputada a ellos quedó a favor.
+    ids_cancelados = {
+        row[0]
+        for row in db.query(models.Trabajo.id)
+        .filter(
+            models.Trabajo.cliente_id == db_trabajo.cliente_id,
+            models.Trabajo.estado == "Cancelado",
+        )
+        .all()
+    }
+
+    def es_movible(trabajo_id) -> bool:
+        # Plata que no está cubriendo un trabajo vivo: sin imputar o de cancelado.
+        return trabajo_id is None or trabajo_id in ids_cancelados
+
+    # Los Movimiento "Pago" se pueden partir; los cheques sólo re-imputar enteros.
+    movs_movibles = sorted(
+        (
+            m for m in movimientos_cliente
+            if m.tipo == "Pago" and m.monto is not None and es_movible(m.trabajo_id)
+        ),
+        key=lambda m: m.fecha or datetime.min,
+    )
+    cheques_movibles = [
+        ch for ch in cheques_cliente
+        if getattr(ch, "clasificacion", "Recibido") == "Recibido"
+        and ch.estado != "Rechazado"
+        and ch.monto is not None
+        and es_movible(ch.trabajo_id)
+    ]
+
+    total_movible = (
+        sum((Q2(m.monto) for m in movs_movibles), Decimal("0"))
+        + sum((Q2(ch.monto) for ch in cheques_movibles), Decimal("0"))
+    )
+    if total_movible <= Decimal("0"):
+        raise HTTPException(
+            status_code=400,
+            detail="El cliente no tiene saldo a favor disponible para aplicar.",
+        )
+
+    monto_a_aplicar = min(saldo_pendiente, total_movible)
+    restante = monto_a_aplicar
+
+    # Leer el crédito y moverlo son pasos separados: dos requests concurrentes (un
+    # doble clic) leen ambos el mismo pago a favor y lo aplican dos veces,
+    # imputando más plata de la que existe y descuadrando la caja. Por eso cada
+    # consumo se hace con un UPDATE condicional: la base es el único árbitro y gana
+    # uno solo; el que pierde ve rowcount 0 y no re-aplica. Mismo criterio que el
+    # guard de imprimir_orden.
+
+    # Movimientos primero (divisibles): permiten cubrir el monto exacto.
+    for m in movs_movibles:
+        if restante <= Decimal("0"):
+            break
+        monto = Q2(m.monto)
+        if monto <= restante:
+            # Re-imputación entera. El WHERE sobre el trabajo_id original es el
+            # candado: si otro request ya lo movió, el rowcount es 0 y no cuenta.
+            candado_origen = (
+                models.Movimiento.trabajo_id.is_(None)
+                if m.trabajo_id is None
+                else models.Movimiento.trabajo_id == m.trabajo_id
+            )
+            reclamado = (
+                db.query(models.Movimiento)
+                .filter(models.Movimiento.id == m.id, candado_origen)
+                .update({"trabajo_id": db_trabajo.id}, synchronize_session=False)
+            )
+            if reclamado:
+                restante = Q2(restante - monto)
+        else:
+            # Parte el pago: la porción que cubre el trabajo se imputa acá; el
+            # resto queda en el movimiento original como saldo a favor suelto. La
+            # fecha se hereda para no mover ingresos de período (calculos.py los
+            # cuenta por fecha). El candado es el monto observado: si otro request
+            # ya lo tocó, el monto cambió y el UPDATE no matchea.
+            reclamado = (
+                db.query(models.Movimiento)
+                .filter(models.Movimiento.id == m.id, models.Movimiento.monto == m.monto)
+                .update({"monto": Q2(monto - restante)}, synchronize_session=False)
+            )
+            if reclamado:
+                db.add(models.Movimiento(
+                    cliente_id=db_trabajo.cliente_id,
+                    trabajo_id=db_trabajo.id,
+                    monto=restante,
+                    tipo="Pago",
+                    metodo=m.metodo,
+                    fecha=m.fecha,
+                    descripcion=f"Aplicación de saldo a favor ({db_trabajo.descripcion_producto})",
+                ))
+                restante = Decimal("0")
+
+    # Cheques: sólo enteros y sólo si entran dentro de lo que todavía falta.
+    for ch in cheques_movibles:
+        if restante <= Decimal("0"):
+            break
+        monto = Q2(ch.monto)
+        if monto <= restante:
+            candado_origen = (
+                models.Cheque.trabajo_id.is_(None)
+                if ch.trabajo_id is None
+                else models.Cheque.trabajo_id == ch.trabajo_id
+            )
+            reclamado = (
+                db.query(models.Cheque)
+                .filter(models.Cheque.id == ch.id, candado_origen)
+                .update({"trabajo_id": db_trabajo.id}, synchronize_session=False)
+            )
+            if reclamado:
+                restante = Q2(restante - monto)
+
+    aplicado = Q2(monto_a_aplicar - restante)
+    if aplicado <= Decimal("0"):
+        # No se movió nada: o el único crédito está en un cheque más grande que la
+        # deuda (no se parte), o otra operación concurrente ya lo consumió.
+        if cheques_movibles:
+            detalle = "El saldo a favor está en un cheque que no se puede dividir para cubrir este trabajo."
+        else:
+            detalle = "No se pudo aplicar el saldo a favor: otra operación ya lo consumió. Volvé a intentarlo."
+        raise HTTPException(status_code=400, detail=detalle)
+
+    return aplicado, Q2(saldo_pendiente - aplicado)
 
 
 @router.post("/", response_model=schemas.TrabajoResponse)
@@ -398,6 +568,31 @@ def iniciar_diseno(trabajo_id: str, datos: schemas.IniciarDisenoRequest, db: Ses
     db.commit()
     db.refresh(db_trabajo)
     return db_trabajo
+
+
+@router.post("/{trabajo_id}/aplicar-saldo-favor", response_model=schemas.AplicarSaldoFavorResponse)
+def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
+    """Cubre el saldo pendiente de un trabajo con el saldo a favor del cliente.
+
+    No crea un pago nuevo (eso duplicaría la plata): re-imputa a este trabajo los
+    pagos que ya existen a favor del cliente. Ver _aplicar_saldo_favor.
+    """
+    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
+    if not db_trabajo:
+        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+
+    if db_trabajo.estado == "Cancelado":
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede aplicar saldo a favor a un trabajo cancelado.",
+        )
+
+    monto_aplicado, saldo_pendiente_restante = _aplicar_saldo_favor(db, db_trabajo)
+    db.commit()
+    return schemas.AplicarSaldoFavorResponse(
+        monto_aplicado=monto_aplicado,
+        saldo_pendiente_restante=saldo_pendiente_restante,
+    )
 
 
 @router.post("/{trabajo_id}/imprimir-orden")
