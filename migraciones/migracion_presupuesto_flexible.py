@@ -20,15 +20,19 @@ el único FK entrante es su auto-referencia 'version_de', que se recrea igual.
 Es IDEMPOTENTE: si 'cliente_id' ya es nullable y 'material'/'gramaje' existen,
 informa y sale sin tocar nada.
 
-CÓMO CORRERLO (una sola vez, con el backend apagado):
-    python migracion_presupuesto_flexible.py
+CÓMO CORRERLO (una sola vez, desde la raíz del proyecto, con el backend apagado):
+    python -m migraciones.migracion_presupuesto_flexible
 """
 import os
 import shutil
 import sqlite3
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Este script vive en migraciones/, pero la base está en la raíz del proyecto:
+# de ahí el dirname() de más. Sin él, DB_PATH apuntaría a migraciones/viamonte.db,
+# que no existe, y la migración terminaría diciendo "nada para migrar" sin haber
+# tocado la base real.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "viamonte.db")
 
 

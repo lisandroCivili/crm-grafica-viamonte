@@ -19,15 +19,19 @@ QUÉ HACE
 
 Es IDEMPOTENTE: se puede correr dos veces sin romper nada.
 
-CÓMO CORRERLO (con el backend apagado):
-    python migracion_orden_produccion.py
+CÓMO CORRERLO (desde la raíz del proyecto, con el backend apagado):
+    python -m migraciones.migracion_orden_produccion
 """
 import os
 import shutil
 import sqlite3
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Este script vive en migraciones/, pero la base está en la raíz del proyecto:
+# de ahí el dirname() de más. Sin él, DB_PATH apuntaría a migraciones/viamonte.db,
+# que no existe, y la migración terminaría diciendo "nada para migrar" sin haber
+# tocado la base real.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "viamonte.db")
 
 # Columnas nuevas de 'trabajos' con su definición SQL.

@@ -16,8 +16,8 @@ QUÉ HACE
 3. Borra viamonte.db y crea las tablas nuevas (esquema Decimal) con create_all.
 4. Reinserta cada fila convirtiendo los montos a Decimal cuantizado (str exacto).
 
-CÓMO CORRERLO (una sola vez, con el backend apagado):
-    python migracion_decimal.py
+CÓMO CORRERLO (una sola vez, desde la raíz del proyecto, con el backend apagado):
+    python -m migraciones.migracion_decimal
 """
 import os
 import shutil
@@ -26,7 +26,11 @@ from datetime import datetime
 
 from money import Q2, Q3
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Este script vive en migraciones/, pero la base está en la raíz del proyecto:
+# de ahí el dirname() de más. Sin él, DB_PATH apuntaría a migraciones/viamonte.db,
+# que no existe, y la migración terminaría diciendo "nada para migrar" sin haber
+# tocado la base real.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "viamonte.db")
 
 # Columnas de DINERO (2 decimales) por tabla.

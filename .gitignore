@@ -1,11 +1,15 @@
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # SQLite
 *.db
 *.sqlite
 viamonte.db
+
+# Copias de resguardo de la base (las que dejan las migraciones al correr)
+backups/
 
 # Entornos virtuales
 venv/
@@ -21,3 +25,7 @@ venv/
 build/
 dist/
 *.spec
+# El .spec del proyecto SÍ se versiona: no es un artefacto de build sino la
+# configuración para generarlo (incluye datas de frontend/ y los hooks de
+# reportlab). Si se pierde, hay que reconstruirla a mano.
+!GraficaViamonte.spec
