@@ -15,8 +15,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <!-- LIBRERÍA DE GRÁFICOS -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 
@@ -1143,6 +1141,22 @@
     </div>
     </main>
 
-    <script src="app.js"></script>
+    <!-- app.js se partio en modulos por dominio. Son <script> clasicos, no ES
+         modules: las funciones tienen que quedar globales para que sigan
+         funcionando los onclick inline de esta misma pagina.
+         El orden importa poco (lo unico que corre al cargar es el
+         DOMContentLoaded de app.js), pero core.js va primero porque define
+         API_URL y los helpers, y app.js va ultimo porque es el arranque. -->
+    <script src="js/core.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/clientes.js"></script>
+    <script src="js/pagos.js"></script>
+    <script src="js/trabajos.js"></script>
+    <script src="js/presupuestos.js"></script>
+    <script src="js/gastos.js"></script>
+    <script src="js/stock.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/cheques.js"></script>
+    <script src="js/app.js"></script>
   </body>
 </html>
