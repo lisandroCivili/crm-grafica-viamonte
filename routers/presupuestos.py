@@ -9,14 +9,16 @@ import models, schemas
 from database import get_db
 from calculos import sumar_detalles_costos, calcular_saldo_trabajo
 from money import Q2
-from presupuesto_pdf import construir_presupuesto_pdf
+from pdf import construir_presupuesto_pdf
+from routers._comun import obtener_o_404
 # El papel del presupuesto se valida con las mismas reglas que el del trabajo
 # (que exista, que se mida en pliegos, que la cantidad sea un entero positivo y
-# que papel y pliegos vayan juntos). Se importa en vez de duplicarla para que no
-# puedan divergir: el presupuesto le pasa el papel al trabajo al convertirse, así
-# que si las reglas difirieran, un presupuesto válido podría producir un trabajo
-# inválido.
-from routers.trabajos import _validar_papel
+# que papel y pliegos vayan juntos). Vive en papel.py, un módulo compartido, para
+# que no puedan divergir: el presupuesto le pasa el papel al trabajo al
+# convertirse, así que si las reglas difirieran, un presupuesto válido podría
+# producir un trabajo inválido. (Antes se importaba de routers.trabajos, un
+# import de router a router.)
+from papel import validar_papel
 
 router = APIRouter(prefix="/api/presupuestos", tags=["Presupuestos"])
 
@@ -56,7 +58,7 @@ def _construir_item(db: Session, item: schemas.ItemPresupuestoCreate, orden: int
     que mande el cliente. El precio_unitario se persiste tal cual (es lo que ve
     el cliente); el total se calcula al leer, no se guarda.
     """
-    _validar_papel(db, item.papel_id, item.cantidad_pliegos)
+    validar_papel(db, item.papel_id, item.cantidad_pliegos)
     costo_materiales = sumar_detalles_costos(item.detalles_costos)
     return models.ItemPresupuesto(
         orden=orden,
@@ -77,9 +79,7 @@ def _construir_item(db: Session, item: schemas.ItemPresupuestoCreate, orden: int
 def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depends(get_db)):
     # El cliente es opcional (borrador sin cliente). Solo si viene, validamos que exista.
     if presupuesto.cliente_id:
-        db_cliente = db.query(models.Cliente).filter(models.Cliente.id == presupuesto.cliente_id).first()
-        if not db_cliente:
-            raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
+        obtener_o_404(db, models.Cliente, presupuesto.cliente_id, "El cliente indicado no existe.")
 
     nuevo_presupuesto = models.Presupuesto(
         cliente_id=presupuesto.cliente_id,
@@ -103,9 +103,7 @@ def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depe
                 status_code=400,
                 detail="Asociar a un trabajo existente solo se puede con un presupuesto de un único ítem.",
             )
-        db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == presupuesto.trabajo_asociado_id).first()
-        if not db_trabajo:
-            raise HTTPException(status_code=404, detail="El trabajo indicado no existe.")
+        db_trabajo = obtener_o_404(db, models.Trabajo, presupuesto.trabajo_asociado_id, "El trabajo indicado no existe.")
         ya_tiene = db.query(models.ItemPresupuesto).filter(
             models.ItemPresupuesto.trabajo_id == presupuesto.trabajo_asociado_id
         ).first()
@@ -227,9 +225,7 @@ def pdf_cliente(presupuesto_id: str, db: Session = Depends(get_db)):
     Trae el presupuesto con sus ítems + cliente y devuelve el PDF armado en el
     backend con ReportLab. Reemplaza al armado con html2pdf del frontend.
     """
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
-    if not db_presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     pdf = construir_presupuesto_pdf(db_presupuesto, db_presupuesto.cliente)
     return Response(
@@ -241,9 +237,7 @@ def pdf_cliente(presupuesto_id: str, db: Session = Depends(get_db)):
 
 @router.put("/{presupuesto_id}", response_model=schemas.PresupuestoResponse)
 def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.PresupuestoUpdate, db: Session = Depends(get_db)):
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
-    if not db_presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if db_presupuesto.convertido_a_trabajo:
         raise HTTPException(status_code=400, detail="No se puede editar: este presupuesto ya fue convertido a trabajo.")
@@ -253,9 +247,7 @@ def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.Pres
     # Solo validamos el cliente si se está asignando uno (permite dejarlo/volverlo a borrador).
     if "cliente_id" in update_data:
         if update_data["cliente_id"]:
-            db_cliente = db.query(models.Cliente).filter(models.Cliente.id == update_data["cliente_id"]).first()
-            if not db_cliente:
-                raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
+            obtener_o_404(db, models.Cliente, update_data["cliente_id"], "El cliente indicado no existe.")
         db_presupuesto.cliente_id = update_data["cliente_id"]
 
     if "estado" in update_data:
@@ -279,9 +271,7 @@ def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.Pres
 
 @router.delete("/{presupuesto_id}")
 def eliminar_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
-    if not db_presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if db_presupuesto.convertido_a_trabajo:
         raise HTTPException(status_code=400, detail="No se puede eliminar: este presupuesto ya fue convertido a trabajo.")
@@ -304,9 +294,7 @@ def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
     quedan ni trabajos huérfanos ni presupuesto marcado a medias. Devuelve la
     lista de trabajos creados.
     """
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
-    if not db_presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if not db_presupuesto.cliente_id:
         raise HTTPException(status_code=400, detail="Asigná un cliente al presupuesto antes de convertirlo.")
@@ -353,9 +341,7 @@ def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depend
 
     Sólo tiene sentido con un único ítem: es ese ítem el que se vincula.
     """
-    db_presupuesto = db.query(models.Presupuesto).filter(models.Presupuesto.id == presupuesto_id).first()
-    if not db_presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if len(db_presupuesto.items) != 1:
         raise HTTPException(
@@ -363,9 +349,7 @@ def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depend
             detail="Asociar a un trabajo existente solo se puede con un presupuesto de un único ítem.",
         )
 
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="El trabajo indicado no existe.")
+    obtener_o_404(db, models.Trabajo, trabajo_id, "El trabajo indicado no existe.")
 
     if db_presupuesto.convertido_a_trabajo or db_presupuesto.items[0].trabajo_id:
         raise HTTPException(status_code=409, detail="Este presupuesto ya fue convertido a trabajo.")

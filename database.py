@@ -1,17 +1,11 @@
 import os
-import sys
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Cuando corre empaquetado (PyInstaller --onefile), sys.executable apunta al
-# .exe real y __file__ apunta a una carpeta temporal (_MEIPASS) que se borra
-# al cerrar el programa. Usamos la carpeta del .exe para que la base de datos
-# persista entre ejecuciones; en desarrollo (`python main.py`), usamos la
-# carpeta del proyecto como antes.
-if getattr(sys, "frozen", False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# La carpeta donde persiste viamonte.db la resuelve rutas.py (junto al .exe
+# cuando corre empaquetado, la carpeta del proyecto en desarrollo). Se conserva
+# el nombre BASE_DIR porque main.py lo importa de acá para la ruta del backup.
+from rutas import DIR_DATOS as BASE_DIR
 
 # Definimos que el archivo 'viamonte.db' se guardará en esa misma carpeta
 DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'viamonte.db')}"

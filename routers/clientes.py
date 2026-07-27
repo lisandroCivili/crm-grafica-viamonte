@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from calculos import calcular_saldo_cliente
+from routers._comun import obtener_o_404
 import uuid
 
 # Instanciamos el router específico para Clientes
@@ -87,9 +88,7 @@ def saldos_clientes(db: Session = Depends(get_db)):
 
 @router.put("/{cliente_id}", response_model=schemas.ClienteResponse)
 def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, db: Session = Depends(get_db)):
-    db_cliente = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not db_cliente:
-        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    db_cliente = obtener_o_404(db, models.Cliente, cliente_id, "Cliente no encontrado")
 
     update_data = cliente_update.model_dump(exclude_unset=True)
 
@@ -112,9 +111,7 @@ def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, d
 
 @router.delete("/{cliente_id}")
 def eliminar_cliente(cliente_id: str, db: Session = Depends(get_db)):
-    db_cliente = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
-    if not db_cliente:
-        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    db_cliente = obtener_o_404(db, models.Cliente, cliente_id, "Cliente no encontrado")
 
     tiene_trabajos = db.query(models.Trabajo).filter(models.Trabajo.cliente_id == cliente_id).first()
     if tiene_trabajos:

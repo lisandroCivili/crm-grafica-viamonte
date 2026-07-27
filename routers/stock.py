@@ -5,6 +5,7 @@ import models, schemas
 from database import get_db
 from datetime import date
 from money import Q2, Q3
+from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/stock", tags=["Stock"])
 
@@ -60,9 +61,7 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
     """Aplica un ítem del carrito: recompra (suma al existente) o alta nueva."""
     articulo = None
     if item.articulo_id:
-        articulo = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == item.articulo_id).first()
-        if not articulo:
-            raise HTTPException(status_code=404, detail=f"Ítem {pos}: artículo con ID {item.articulo_id} no encontrado.")
+        articulo = obtener_o_404(db, models.ArticuloStock, item.articulo_id, f"Ítem {pos}: artículo con ID {item.articulo_id} no encontrado.")
     elif not item.nombre or not item.unidad:
         raise HTTPException(status_code=400, detail=f"Ítem {pos}: nombre y unidad son obligatorios para un artículo nuevo.")
 
@@ -178,9 +177,7 @@ def registrar_compra(items: list[schemas.CompraStockItem], db: Session = Depends
 
 @router.patch("/{articulo_id}")
 def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: Session = Depends(get_db)):
-    db_art = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == articulo_id).first()
-    if not db_art:
-        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    db_art = obtener_o_404(db, models.ArticuloStock, articulo_id, "Artículo no encontrado")
 
     # Campos descriptivos: se pisan directo, no generan historial (el historial es solo para cantidad)
     for campo in ("nombre", "categoria", "proveedor", "unidad", "stock_minimo", "largo_cm", "ancho_cm", "gramaje_grs"):
@@ -215,9 +212,7 @@ def ver_historial(articulo_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/{articulo_id}")
 def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
-    db_art = db.query(models.ArticuloStock).filter(models.ArticuloStock.id == articulo_id).first()
-    if not db_art:
-        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    db_art = obtener_o_404(db, models.ArticuloStock, articulo_id, "Artículo no encontrado")
 
     lo_usa_un_trabajo = db.query(models.Trabajo).filter(models.Trabajo.papel_id == articulo_id).first()
     if lo_usa_un_trabajo:

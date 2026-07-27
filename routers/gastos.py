@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import models, schemas
 from calculos import CATEGORIA_COSTO_PRESUPUESTADO
 from database import get_db
+from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/gastos", tags=["Gastos"])
 
@@ -38,9 +39,7 @@ def crear_gasto(gasto: schemas.GastoCreate, db: Session = Depends(get_db)):
 
 @router.put("/{gasto_id}", response_model=schemas.GastoResponse)
 def actualizar_gasto(gasto_id: str, gasto_update: schemas.GastoUpdate, db: Session = Depends(get_db)):
-    db_gasto = db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
-    if not db_gasto:
-        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+    db_gasto = obtener_o_404(db, models.Gasto, gasto_id, "Gasto no encontrado")
 
     update_data = gasto_update.model_dump(exclude_unset=True)
 
@@ -60,9 +59,7 @@ def actualizar_gasto(gasto_id: str, gasto_update: schemas.GastoUpdate, db: Sessi
 
 @router.delete("/{gasto_id}")
 def eliminar_gasto(gasto_id: str, db: Session = Depends(get_db)):
-    db_gasto = db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
-    if not db_gasto:
-        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+    db_gasto = obtener_o_404(db, models.Gasto, gasto_id, "Gasto no encontrado")
     db.delete(db_gasto)
     db.commit()
     return {"mensaje": "Gasto eliminado"}

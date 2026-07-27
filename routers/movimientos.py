@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
-from calculos import calcular_saldo_cliente, _metodo_es_cheque
+from calculos import calcular_saldo_cliente, metodo_es_cheque
+from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/movimientos", tags=["Movimientos"])
 
@@ -28,7 +29,7 @@ def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db
     # con cheque no, la regla dependería del medio de pago y no del hecho económico.
     # Esa plata igual queda visible: el dashboard la informa en ingresos_sin_imputar.
 
-    if mov.tipo == "Pago" and _metodo_es_cheque(mov.metodo):
+    if mov.tipo == "Pago" and metodo_es_cheque(mov.metodo):
         raise HTTPException(status_code=400, detail=ERROR_PAGO_CHEQUE)
 
     nuevo = models.Movimiento(**mov.model_dump())
@@ -58,9 +59,7 @@ def listar_movimientos(cliente_id: str, db: Session = Depends(get_db)):
 
 @router.put("/{movimiento_id}", response_model=schemas.MovimientoResponse)
 def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpdate, db: Session = Depends(get_db)):
-    db_mov = db.query(models.Movimiento).filter(models.Movimiento.id == movimiento_id).first()
-    if not db_mov:
-        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    db_mov = obtener_o_404(db, models.Movimiento, movimiento_id, "Movimiento no encontrado")
 
     update_data = mov_update.model_dump(exclude_unset=True)
 
@@ -72,7 +71,7 @@ def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpda
     # Sólo validamos si el request toca tipo o método: así una fila histórica con
     # metodo='Cheque' sigue siendo editable en sus otros campos.
     if ("tipo" in update_data or "metodo" in update_data) and nuevo_tipo == "Pago":
-        if _metodo_es_cheque(update_data.get("metodo", db_mov.metodo)):
+        if metodo_es_cheque(update_data.get("metodo", db_mov.metodo)):
             raise HTTPException(status_code=400, detail=ERROR_PAGO_CHEQUE)
 
     for key, value in update_data.items():
@@ -84,9 +83,7 @@ def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpda
 
 @router.delete("/{movimiento_id}")
 def eliminar_movimiento(movimiento_id: str, db: Session = Depends(get_db)):
-    db_mov = db.query(models.Movimiento).filter(models.Movimiento.id == movimiento_id).first()
-    if not db_mov:
-        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    db_mov = obtener_o_404(db, models.Movimiento, movimiento_id, "Movimiento no encontrado")
 
     db.delete(db_mov)
     db.commit()

@@ -6,7 +6,9 @@ from database import get_db
 from datetime import date, datetime, timezone
 from money import Q2, Q3
 from calculos import calcular_saldo_trabajo
-from orden_pdf import construir_orden_pdf
+from papel import buscar_papel, validar_papel
+from pdf import construir_orden_pdf
+from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
 
@@ -60,79 +62,6 @@ def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str):
         )
 
 
-def _buscar_papel(db: Session, papel_id: str) -> models.ArticuloStock:
-    """Trae el artículo de stock y verifica que sea papel medido en pliegos.
-
-    El selector de papel históricamente listaba TODO el stock, así que nada
-    impedía vincular una orden a un bidón de tinta y restarle "3 pliegos".
-    Las compras por Kg ya se normalizan a "Pliegos" en stock.py, así que la
-    validación no deja afuera al papel comprado por peso.
-    """
-    articulo = (
-        db.query(models.ArticuloStock)
-        .filter(models.ArticuloStock.id == papel_id)
-        .first()
-    )
-    if not articulo:
-        raise HTTPException(status_code=404, detail="El papel indicado no existe en el stock.")
-
-    if articulo.unidad != "Pliegos":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"'{articulo.nombre}' se mide en {articulo.unidad}, no en pliegos. "
-                "Elegí un papel del stock."
-            ),
-        )
-    return articulo
-
-
-def _validar_pliegos(cantidad_pliegos) -> None:
-    """Los pliegos son unidades físicas: no existe medio pliego.
-
-    Sólo se aplica sobre lo que entra por la API. _descontar_papel no lo usa
-    porque hay trabajos históricos con cantidades fraccionarias y el descuento
-    no debe romperse por eso.
-    """
-    if cantidad_pliegos is None:
-        return
-
-    pliegos = Q3(cantidad_pliegos)
-    if pliegos <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="La cantidad de pliegos debe ser mayor a cero.")
-    if pliegos != pliegos.to_integral_value():
-        raise HTTPException(
-            status_code=400,
-            detail=f"La cantidad de pliegos debe ser un número entero (recibido: {pliegos}).",
-        )
-
-
-def _validar_papel(db: Session, papel_id, cantidad_pliegos) -> None:
-    """Valida el papel elegido, si se eligió uno. Compartido con presupuestos.
-
-    Los dos campos van juntos: un papel sin pliegos no descuenta nada (el guard
-    de _descontar_papel lo saltea) y el stock queda desfasado en silencio, que
-    es el mismo síntoma que tenía el presupuesto convertido. Pliegos sin papel
-    no tienen a qué aplicarse.
-
-    Dejar los dos en null sí es válido: significa que el papel lo trae el
-    cliente o se compra en el momento, y entonces no hay nada que descontar.
-    """
-    if papel_id and cantidad_pliegos is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Elegiste un papel del stock: indicá cuántos pliegos consume, si no la orden no puede descontarlo.",
-        )
-    if cantidad_pliegos is not None and not papel_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Cargaste una cantidad de pliegos pero no elegiste de qué papel del stock descontarlos.",
-        )
-    if papel_id:
-        _buscar_papel(db, papel_id)
-        _validar_pliegos(cantidad_pliegos)
-
-
 def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str, forzar: bool):
     """Descuenta del stock el papel que consume la orden y lo deja en el historial.
 
@@ -142,7 +71,7 @@ def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str,
     if not db_trabajo.papel_id or not db_trabajo.cantidad_pliegos:
         return  # Papel del cliente o comprado en el momento: no hay qué descontar.
 
-    articulo = _buscar_papel(db, db_trabajo.papel_id)
+    articulo = buscar_papel(db, db_trabajo.papel_id)
 
     pliegos = Q3(db_trabajo.cantidad_pliegos)
     if pliegos <= Decimal("0"):
@@ -187,7 +116,7 @@ def _devolver_papel(db: Session, db_trabajo: models.Trabajo):
     if not db_trabajo.papel_id or not db_trabajo.cantidad_pliegos:
         return
 
-    articulo = _buscar_papel(db, db_trabajo.papel_id)
+    articulo = buscar_papel(db, db_trabajo.papel_id)
 
     pliegos = Q3(db_trabajo.cantidad_pliegos)
     if pliegos <= Decimal("0"):
@@ -371,11 +300,9 @@ def _aplicar_saldo_favor(db: Session, db_trabajo: models.Trabajo) -> tuple[Decim
 
 @router.post("/", response_model=schemas.TrabajoResponse)
 def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db)):
-    db_cliente = db.query(models.Cliente).filter(models.Cliente.id == trabajo.cliente_id).first()
-    if not db_cliente:
-        raise HTTPException(status_code=404, detail="El cliente indicado no existe.")
+    obtener_o_404(db, models.Cliente, trabajo.cliente_id, "El cliente indicado no existe.")
 
-    _validar_papel(db, trabajo.papel_id, trabajo.cantidad_pliegos)
+    validar_papel(db, trabajo.papel_id, trabajo.cantidad_pliegos)
 
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
@@ -418,9 +345,7 @@ def actualizar_trabajo(
     en el schema) por el mismo criterio que 'forzar' en imprimir-orden: es una
     decisión del operador en el momento, no un dato del trabajo.
     """
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     update_data = trabajo_update.model_dump(exclude_unset=True)
 
@@ -441,7 +366,7 @@ def actualizar_trabajo(
     # artículo inexistente o con la unidad equivocada. Validamos contra el valor
     # efectivo (lo que viene en el update, o lo que ya tenía el trabajo).
     if "papel_id" in update_data or "cantidad_pliegos" in update_data:
-        _validar_papel(
+        validar_papel(
             db,
             update_data.get("papel_id", db_trabajo.papel_id),
             update_data.get("cantidad_pliegos", db_trabajo.cantidad_pliegos),
@@ -473,9 +398,7 @@ def actualizar_trabajo(
 
 @router.delete("/{trabajo_id}")
 def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     tiene_movimientos = db.query(models.Movimiento).filter(models.Movimiento.trabajo_id == trabajo_id).first()
     if tiene_movimientos:
@@ -511,9 +434,7 @@ def iniciar_diseno(trabajo_id: str, datos: schemas.IniciarDisenoRequest, db: Ses
     'Pago', que es como el sistema ya calcula los saldos (calculos.py). Puede
     ser un pago parcial. Si no hubo seña, queda el motivo asentado como Nota.
     """
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     if db_trabajo.estado != "Aprobado":
         raise HTTPException(
@@ -577,9 +498,7 @@ def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
     No crea un pago nuevo (eso duplicaría la plata): re-imputa a este trabajo los
     pagos que ya existen a favor del cliente. Ver _aplicar_saldo_favor.
     """
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     if db_trabajo.estado == "Cancelado":
         raise HTTPException(
@@ -605,9 +524,7 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
     forzar=true permite emitir la orden aunque no alcance el papel (se compra en
     el momento), dejando constancia en el historial de stock.
     """
-    db_trabajo = db.query(models.Trabajo).filter(models.Trabajo.id == trabajo_id).first()
-    if not db_trabajo:
-        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     if not db_trabajo.orden_impresa:
         numero_orden = _generar_numero_orden(db)

@@ -1,10 +1,11 @@
 """
 Armado del PDF del Presupuesto (el comprobante que ve el cliente).
 
-Módulo plano, hermano de orden_pdf.py: no toca la base de datos ni tiene
-efectos. Recibe el presupuesto y el cliente ya cargados y devuelve los bytes del
-PDF. La lógica de layout vive acá y no en el router para no meter cien líneas de
-diseño adentro de un endpoint.
+Hermano de pdf/orden.py: no toca la base de datos ni tiene efectos. Recibe el
+presupuesto y el cliente ya cargados y devuelve los bytes del PDF. La lógica de
+layout vive acá y no en el router para no meter cien líneas de diseño adentro de
+un endpoint. Los helpers compartidos (texto, ruta_asset, pesos) están en
+pdf/comun.py.
 
 A diferencia de la orden de producción (que dibuja filas a mano con el canvas),
 el presupuesto tiene una tabla real cuyas celdas envuelven texto en varias
@@ -22,8 +23,6 @@ Estructura, de arriba hacia abajo:
 Fidelidad acordada con el usuario: limpio y profesional, no pixel-perfect. No se
 clona la cola triangular del header del diseño original.
 """
-import os
-import sys
 from decimal import Decimal
 from io import BytesIO
 
@@ -33,6 +32,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
+
+from pdf.comun import pesos, ruta_asset, texto
 
 ANCHO, ALTO = A4
 
@@ -57,43 +58,6 @@ GRIS_BORDE = colors.HexColor("#cccccc")
 GRIS_TEXTO = colors.HexColor("#555555")
 
 
-def _ruta_asset(nombre):
-    """Ruta de un asset de frontend/assets/, o None si no existe.
-
-    Misma lógica que orden_pdf._ruta_logo: empaquetado con PyInstaller los
-    archivos se extraen a sys._MEIPASS; en desarrollo se usa la carpeta del
-    proyecto. El .spec ya incluye datas=[('frontend','frontend')].
-    """
-    if getattr(sys, "frozen", False):
-        base = sys._MEIPASS
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    ruta = os.path.join(base, "frontend", "assets", nombre)
-    return ruta if os.path.exists(ruta) else None
-
-
-def _texto(valor):
-    """Normaliza un valor para imprimirlo: None y vacío se muestran como '-'."""
-    if valor is None:
-        return "-"
-    texto = str(valor).strip()
-    return texto if texto else "-"
-
-
-def _pesos(valor):
-    """Formatea un monto al estilo argentino: 1.890.000 o 1.890.500,50.
-
-    Igual criterio que fmtMoney del frontend, pero omite los decimales cuando
-    son cero, que es como se ve el PDF de referencia (precios enteros). Sin
-    símbolo $: cada lugar decide si lo antepone.
-    """
-    numero = Decimal(valor or 0)
-    entero = int(numero)
-    centavos = int((abs(numero) - abs(entero)) * 100)
-    miles = f"{entero:,}".replace(",", ".")
-    return miles if centavos == 0 else f"{miles},{centavos:02d}"
-
-
 def _fecha(presupuesto):
     return presupuesto.fecha_creacion.strftime("%d/%m/%Y") if presupuesto.fecha_creacion else "-"
 
@@ -112,7 +76,7 @@ def _dibujar_header(c, presupuesto, cliente):
     más baja) queda blanco, y ahí va la FECHA en negro. 'Cliente' va más abajo,
     también en negro sobre blanco.
     """
-    ruta_logo = _ruta_asset("logo-presupuesto-cl.png")
+    ruta_logo = ruta_asset("logo-presupuesto-cl.png")
     nombre_cliente = cliente.nombre_completo if cliente else "Sin cliente"
     fecha_str = _fecha(presupuesto)
 
@@ -165,10 +129,10 @@ def _construir_tabla(presupuesto):
     for item in presupuesto.items:
         total_item = item.cantidad * item.precio_unitario
         filas.append([
-            Paragraph(_texto(item.descripcion), estilo_desc),
-            _texto(item.cantidad),
-            _pesos(item.precio_unitario),
-            _pesos(total_item),
+            Paragraph(texto(item.descripcion), estilo_desc),
+            texto(item.cantidad),
+            pesos(item.precio_unitario),
+            pesos(total_item),
         ])
 
     ancho_util = ANCHO - 2 * MARGEN
@@ -207,7 +171,7 @@ def _dibujar_total(c, y, presupuesto):
     de referencia (la caja ocupa buena parte del ancho, no sólo el texto).
     """
     total = sum((i.cantidad * i.precio_unitario for i in presupuesto.items), Decimal("0"))
-    texto = f"TOTAL:  $ {_pesos(total)}"
+    texto = f"TOTAL:  $ {pesos(total)}"
 
     pad = 8 * mm
     alto_caja = 13 * mm
@@ -236,7 +200,7 @@ def _dibujar_firma_y_pie(c):
     # Eje de la firma: centrada un poco a la derecha del centro, como el diseño.
     eje_firma = ANCHO * 0.6
 
-    firma = _ruta_asset("firma-facu.png")
+    firma = ruta_asset("firma-facu.png")
     # Base de la imagen de la firma; el nombre va justo debajo.
     y_base_firma = 40 * mm
     if firma:

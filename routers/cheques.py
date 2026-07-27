@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
+from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/cheques", tags=["Cheques"])
 
@@ -77,9 +78,7 @@ def crear_cheque(cheque: schemas.ChequeCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{cheque_id}", response_model=schemas.ChequeResponse)
 def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, db: Session = Depends(get_db)):
-    db_cheque = db.query(models.Cheque).filter(models.Cheque.id == cheque_id).first()
-    if not db_cheque:
-        raise HTTPException(status_code=404, detail="Cheque no encontrado")
+    db_cheque = obtener_o_404(db, models.Cheque, cheque_id, "Cheque no encontrado")
 
     cambios = update_data.model_dump(exclude_unset=True)
     motivo = cambios.pop("motivo", None)  # no es columna del cheque
@@ -131,9 +130,7 @@ def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, 
 
 @router.get("/{cheque_id}/historial", response_model=list[schemas.HistorialChequeResponse])
 def historial_cheque(cheque_id: str, db: Session = Depends(get_db)):
-    db_cheque = db.query(models.Cheque).filter(models.Cheque.id == cheque_id).first()
-    if not db_cheque:
-        raise HTTPException(status_code=404, detail="Cheque no encontrado")
+    db_cheque = obtener_o_404(db, models.Cheque, cheque_id, "Cheque no encontrado")
     return (
         db.query(models.HistorialCheque)
         .filter(models.HistorialCheque.cheque_id == cheque_id)
@@ -143,9 +140,7 @@ def historial_cheque(cheque_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/{cheque_id}")
 def eliminar_cheque(cheque_id: str, db: Session = Depends(get_db)):
-    db_cheque = db.query(models.Cheque).filter(models.Cheque.id == cheque_id).first()
-    if not db_cheque:
-        raise HTTPException(status_code=404, detail="Cheque no encontrado")
+    db_cheque = obtener_o_404(db, models.Cheque, cheque_id, "Cheque no encontrado")
 
     # Un cheque cobrado o endosado ya movió plata: borrarlo distorsiona ingresos y ganancia.
     if db_cheque.estado in {"Cobrado", "Endosado"}:

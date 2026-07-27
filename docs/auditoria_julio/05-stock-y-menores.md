@@ -35,7 +35,10 @@ los tipos coinciden (`Cantidad`/Q3 en ambos lados). El problema es el borde:
    input de cantidad con `step="1"`.
 
 **Resuelto 20/07/2026.** Dos helpers nuevos en `routers/trabajos.py`:
-`_buscar_papel` (existencia + unidad) y `_validar_pliegos` (entero > 0). Se
+`_buscar_papel` (existencia + unidad) y `_validar_pliegos` (entero > 0).
+(Reorganización posterior: se movieron al módulo compartido `papel.py` y pasaron
+a ser públicos, `buscar_papel` / `validar_pliegos`, para cortar el import de
+`routers/presupuestos.py` a `routers/trabajos.py`.) Se
 aplican en `crear_trabajo`, en `actualizar_trabajo` (que **no validaba nada** del
 papel) y, sólo la unidad, en `_descontar_papel` como red de seguridad. El entero
 se valida únicamente sobre lo que entra por la API: los trabajos históricos con

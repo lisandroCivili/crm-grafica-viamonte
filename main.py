@@ -1,6 +1,5 @@
 import models
 import os
-import sys
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import engine, BASE_DIR
+from rutas import ruta_recurso
 # Importamos todos los routers modulares que creamos
 from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes
 
@@ -82,13 +82,9 @@ def estado_servidor():
 # ==========================================
 # FRONTEND (servido por el propio backend)
 # ==========================================
-# Cuando corre empaquetado con PyInstaller (--onefile), los archivos que se
-# agregan con --add-data se extraen a una carpeta temporal en sys._MEIPASS;
-# en desarrollo, usamos la carpeta 'frontend' del proyecto tal cual.
-if getattr(sys, "frozen", False):
-    FRONTEND_DIR = os.path.join(sys._MEIPASS, "frontend")
-else:
-    FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+# Empaquetado con PyInstaller el frontend se extrae a una carpeta temporal; en
+# desarrollo es la carpeta 'frontend' del proyecto. Eso lo resuelve rutas.py.
+FRONTEND_DIR = ruta_recurso("frontend")
 
 # Se monta al final y en "/" para que no tape ninguna ruta /api/*: FastAPI
 # resuelve las rutas explícitas (los routers de arriba) antes de caer acá.

@@ -44,8 +44,12 @@ def _a_fecha(valor):
     return valor
 
 
-def _metodo_es_cheque(metodo) -> bool:
-    """Un pago abonado con cheque no es plata realizada: se sigue por Cheque."""
+def metodo_es_cheque(metodo) -> bool:
+    """Un pago abonado con cheque no es plata realizada: se sigue por Cheque.
+
+    Pública porque la comparte routers/movimientos.py (rechaza registrar un pago
+    con método Cheque, que debe ir por el módulo Cheques).
+    """
     return (metodo or "").strip().lower() == "cheque"
 
 
@@ -220,7 +224,7 @@ def _cobros_realizados(
     for m in movimientos:
         if getattr(m, "tipo", None) != "Pago" or m.monto is None:
             continue
-        if _metodo_es_cheque(getattr(m, "metodo", None)):
+        if metodo_es_cheque(getattr(m, "metodo", None)):
             continue
         if en_periodo(_a_fecha(m.fecha)):
             yield getattr(m, "trabajo_id", None), Q2(m.monto)
