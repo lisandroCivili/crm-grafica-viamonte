@@ -149,3 +149,24 @@ tr:hover td { background: var(--magenta-soft); }
 
 /* Oculta las acciones de las tarjetas sólo mientras se captura la hoja de ruta en PDF. */
 .kanban-board.ocultar-acciones .no-print { display: none !important; }
+
+/* MANUAL DE USUARIO (Markdown renderizado con marked.js) */
+#manual-contenido { max-width: 820px; line-height: 1.6; }
+#manual-contenido h1 { font-size: 26px; margin-bottom: 8px; }
+#manual-contenido h2 { font-size: 20px; color: var(--magenta-dark); margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); }
+#manual-contenido h2:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+#manual-contenido h3 { font-size: 15px; margin-top: 24px; }
+#manual-contenido p { margin: 10px 0; }
+#manual-contenido ul, #manual-contenido ol { padding-left: 22px; }
+#manual-contenido li { margin-bottom: 6px; }
+#manual-contenido blockquote {
+  background: var(--magenta-soft);
+  border-left: 4px solid var(--magenta);
+  margin: 16px 0;
+  padding: 10px 16px;
+  border-radius: 0 8px 8px 0;
+  font-size: 13.5px;
+}
+#manual-contenido blockquote p { margin: 6px 0; }
+#manual-contenido code { background: var(--paper); font-family: 'JetBrains Mono'; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+#manual-contenido hr { border: none; border-top: 1px solid var(--line); margin: 28px 0; }

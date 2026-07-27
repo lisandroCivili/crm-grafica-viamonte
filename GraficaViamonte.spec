@@ -10,7 +10,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=rl_binaries,
-    datas=[('frontend', 'frontend')] + rl_datas,
+    datas=[('frontend', 'frontend'), ('docs', 'docs')] + rl_datas,
     hiddenimports=rl_hiddenimports,
     hookspath=[],
     hooksconfig={},

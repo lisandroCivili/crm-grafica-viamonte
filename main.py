@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import engine, BASE_DIR
@@ -77,6 +77,25 @@ def estado_servidor():
         "status": "online",
         "msg": "El backend de Gráfica Viamonte está marchando de diez.",
     }
+
+
+# ==========================================
+# MANUAL DE USUARIO
+# ==========================================
+@app.get("/api/manual", response_class=PlainTextResponse)
+def obtener_manual():
+    """Devuelve el manual de usuario en Markdown crudo; el frontend lo renderiza.
+
+    docs/manual_usuario.md es la única fuente de verdad (también se lee como
+    archivo normal en el repo). ruta_recurso() la resuelve tanto en desarrollo
+    como empaquetada con PyInstaller (ver GraficaViamonte.spec: 'docs' viaja
+    junto a 'frontend' como recurso de sólo lectura).
+    """
+    ruta_manual = ruta_recurso("docs", "manual_usuario.md")
+    if not os.path.exists(ruta_manual):
+        raise HTTPException(status_code=404, detail="Manual no encontrado")
+    with open(ruta_manual, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 # ==========================================
