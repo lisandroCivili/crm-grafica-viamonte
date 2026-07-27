@@ -12,19 +12,18 @@ const ESTADOS_FINALES_CHEQUE = ['Cobrado', 'Endosado', 'Rechazado'];
 // El backend rechaza transiciones inválidas y ediciones sobre cheques cobrados:
 // sin esto los errores pasarían en silencio y el usuario creería que guardó.
 async function mostrarErrorCheque(resp, titulo) {
-    let detalle = 'Ocurrió un error inesperado.';
+    let data = {};
     try {
-        const data = await resp.json();
-        if (data && data.detail) detalle = data.detail;
+        data = await resp.json();
     } catch (e) { /* respuesta sin cuerpo JSON */ }
-    await Swal.fire(titulo, detalle, 'warning');
+    await Swal.fire(titulo, detalleError(data, 'Ocurrió un error inesperado.'), 'warning');
 }
 
 async function abrirDrawerCheque() {
     idChequeEditando = null;
     document.getElementById('titulo-drawer-cheque').innerText = 'Ingresar Nuevo Cheque';
     document.getElementById('form-cheque').reset();
-    document.getElementById('fch_emision').value = new Date().toISOString().split('T')[0];
+    document.getElementById('fch_emision').value = fechaHoyLocal();
 
     // Cargar clientes en el select
     try {
@@ -371,7 +370,7 @@ async function ofrecerGastoPorCheque(cheque, destinatario) {
                 categoria: 'Insumos',
                 concepto: `Pago con cheque ${cheque.banco} N° ${cheque.numero} a ${nombre}`,
                 monto: cheque.monto,
-                fecha: new Date().toISOString().split('T')[0],
+                fecha: fechaHoyLocal(),
                 metodo_pago: 'Cheque',
                 comprobante: `Cheque N° ${cheque.numero}`,
                 trabajo_id: cheque.trabajo_id || null

@@ -48,3 +48,14 @@ from .reportes import (
     MorosoResponse,
     DashboardResponse,
 )
+from .asistencia import (
+    EmpleadoBase,
+    EmpleadoCreate,
+    EmpleadoUpdate,
+    EmpleadoResponse,
+    FilaPlanillaGuardar,
+    PlanillaGuardarRequest,
+    FilaPlanillaResponse,
+    PlanillaDiaResponse,
+    ResumenEmpleadoResponse,
+)

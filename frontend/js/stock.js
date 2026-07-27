@@ -240,7 +240,7 @@ async function guardarArticuloStock(e) {
                 Swal.fire({ title: 'Compra registrada', icon: 'success', timer: 1200, showConfirmButton: false });
             } else {
                 const err = await resp.json().catch(() => ({}));
-                Swal.fire({ title: 'No se pudo registrar la compra', text: err.detail || 'Error inesperado', icon: 'error' });
+                Swal.fire({ title: 'No se pudo registrar la compra', text: detalleError(err, 'Error inesperado'), icon: 'error' });
             }
         }
     } catch (error) { console.error("Error guardando stock:", error); }

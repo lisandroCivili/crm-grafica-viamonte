@@ -24,7 +24,7 @@ async function abrirDrawerGasto() {
     idGastoEditando = null;
     document.getElementById('titulo-drawer-gasto').innerText = 'Registrar Salida de Dinero';
     document.getElementById('form-gasto').reset();
-    document.getElementById('fg_fecha').value = new Date().toISOString().split('T')[0];
+    document.getElementById('fg_fecha').value = fechaHoyLocal();
 
     try {
         const respT = await fetch(`${API_URL}/trabajos/`);
@@ -234,7 +234,7 @@ async function guardarGasto(e) {
             Swal.fire({ title: titulo, icon: 'success', timer: 1500, showConfirmButton: false });
         } else {
             const error = await resp.json().catch(() => ({}));
-            Swal.fire('No se pudo guardar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
+            Swal.fire('No se pudo guardar', detalleError(error), 'error');
         }
     } catch (error) {
         console.error("Error al guardar gasto:", error);

@@ -7,7 +7,7 @@ en vez de modelos SQLAlchemy: no hace falta engine ni fixtures de DB.
 Los tests marcados con BUG documentan comportamiento actual que quedó señalado
 en la auditoría. No se corrigen acá: primero hay que decidir la regla de negocio.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 
@@ -21,6 +21,7 @@ from calculos import (
     fraccion_ganancia,
     fraccion_ganancia_efectiva,
     ganancia_bruta_realizada,
+    horas_trabajadas,
     ingresos_reales,
     ingresos_sin_imputar,
     sumar_detalles_costos,
@@ -474,3 +475,43 @@ class TestTotalGastosOperativos:
         assert egresos == Decimal("800.00")
         assert operativos == Decimal("300.00")
         assert egresos - operativos == Decimal("500.00")
+
+
+# --- horas_trabajadas -------------------------------------------------------
+
+class TestHorasTrabajadas:
+    """Horas de una jornada, en decimal, a partir de la entrada y la salida."""
+
+    def test_una_jornada_completa(self):
+        assert horas_trabajadas(time(8, 0), time(17, 0)) == Decimal("9.00")
+
+    def test_los_minutos_van_en_decimal_no_en_sexagesimal(self):
+        # Media hora es 0.50, no 0.30: estas horas después se suman entre sí.
+        assert horas_trabajadas(time(8, 0), time(16, 30)) == Decimal("8.50")
+
+    def test_un_cuarto_de_hora(self):
+        assert horas_trabajadas(time(9, 0), time(9, 15)) == Decimal("0.25")
+
+    def test_los_minutos_que_no_dan_exacto_se_cuantizan_a_dos_decimales(self):
+        # 8h20m = 8.333... horas. Se corta en 8.33, igual que el dinero.
+        assert horas_trabajadas(time(8, 0), time(16, 20)) == Decimal("8.33")
+
+    def test_sin_salida_no_hay_jornada_que_medir(self):
+        # None y no 0: el empleado entró y todavía no salió. Un 0 diría que vino
+        # y no trabajó, que es un caso distinto.
+        assert horas_trabajadas(time(8, 0), None) is None
+
+    def test_sin_entrada_tampoco(self):
+        assert horas_trabajadas(None, time(17, 0)) is None
+
+    def test_una_fila_vacia_no_suma(self):
+        assert horas_trabajadas(None, None) is None
+
+    def test_una_salida_anterior_a_la_entrada_da_cero_y_no_negativo(self):
+        # El schema corta este caso con un 422 antes de la base. Acá se prueba la
+        # red de seguridad: si el dato entrara por ORM, un negativo le restaría
+        # horas a los otros días del resumen del mes.
+        assert horas_trabajadas(time(17, 0), time(8, 0)) == Decimal("0.00")
+
+    def test_entrar_y_salir_a_la_misma_hora_da_cero(self):
+        assert horas_trabajadas(time(8, 0), time(8, 0)) == Decimal("0.00")

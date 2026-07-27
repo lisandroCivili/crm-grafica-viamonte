@@ -59,6 +59,21 @@ function esc(valor) {
 }
 
 // ==========================================
+// HELPER: HOY EN HORA LOCAL (YYYY-MM-DD)
+// ==========================================
+// No se usa toISOString(), que devuelve UTC: en Argentina (UTC-3) desde las
+// 21:00 el UTC ya es el día siguiente, así que todo lo cargado a la noche
+// -gastos, trabajos, presupuestos, cheques- quedaba fechado mañana y caía en el
+// mes equivocado en los informes. Es el equivalente en el frontend de
+// ahora_local() (models.py): la fecha que vale es la del taller, no la del meridiano.
+function fechaHoyLocal() {
+    const ahora = new Date();
+    const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+    const dia = String(ahora.getDate()).padStart(2, '0');
+    return `${ahora.getFullYear()}-${mes}-${dia}`;
+}
+
+// ==========================================
 // HELPER: MENSAJE DE ERROR DE LA API
 // ==========================================
 // El `detail` de FastAPI es un string en los HTTPException nuestros, pero un

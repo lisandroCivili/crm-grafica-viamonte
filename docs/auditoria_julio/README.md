@@ -13,6 +13,7 @@ en orden, uno por sesión.
 | 3 | [03-cheques-v2.md](03-cheques-v2.md) | I1 trabajo_id, I2 historial+estados, I3 Emitidos/Endosados (+I4, I5) | Importante |
 | 4 | [04-politica-gastos-vs-margen.md](04-politica-gastos-vs-margen.md) | I10 doble descuento, I11 margen congelado, I12 desfase caja (+I9) — **arranca con decisión de negocio** | Importante |
 | 5 | [05-stock-y-menores.md](05-stock-y-menores.md) | I6-I8 stock + todos los menores + notas de seguridad | Importante/Menor — **resuelto 20/07/2026** (salvo el menor 11, postergado) |
+| 6 | [06-fechas-utc-en-el-frontend.md](06-fechas-utc-en-el-frontend.md) | `toISOString()` fecha en UTC lo que el backend fecha en local: gastos, trabajos, presupuestos, cheques y pagos cargados después de las 21:00 caen al día siguiente (+ `error.detail` crudo, que resultaron ser 19 puntos y no 3) | Importante — **resuelto 27/07/2026** |
 
 Contexto técnico transversal: **Pydantic v2 serializa `Decimal` como string JSON**
 — todo monto que llega al frontend es string; cualquier aritmética en JS debe

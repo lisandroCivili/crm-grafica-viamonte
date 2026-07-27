@@ -10,7 +10,7 @@ database.py está atado a SU engine, así que un engine nuevo nace con las FK
 desactivadas y los tests dejarían de ver los errores de integridad que sí
 ocurren en producción.
 """
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 
 import pytest
@@ -202,3 +202,28 @@ def crear_presupuesto(db, cliente=None, items=None, **overrides):
 
     db.refresh(presupuesto)
     return presupuesto
+
+
+def crear_empleado(db, **overrides):
+    datos = dict(nombre="Empleado Test", activo=True)
+    datos.update(overrides)
+    empleado = models.Empleado(**datos)
+    db.add(empleado)
+    db.commit()
+    db.refresh(empleado)
+    return empleado
+
+
+def crear_registro_asistencia(db, empleado, **overrides):
+    datos = dict(
+        empleado_id=empleado.id,
+        fecha=date.today(),
+        hora_entrada=time(8, 0),
+        hora_salida=time(17, 0),
+    )
+    datos.update(overrides)
+    registro = models.RegistroAsistencia(**datos)
+    db.add(registro)
+    db.commit()
+    db.refresh(registro)
+    return registro

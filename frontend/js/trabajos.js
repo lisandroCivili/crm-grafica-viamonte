@@ -85,7 +85,7 @@ async function guardarEdicionTrabajo(e) {
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "No se pudo guardar el cambio.");
+            throw new Error(detalleError(err, "No se pudo guardar el cambio."));
         }
 
         // Nota: antes se registraba un Movimiento con monto:0 como log del cambio.
@@ -132,7 +132,7 @@ async function eliminarTrabajo(id, button) {
             Swal.fire('¡Eliminado!', 'El trabajo fue borrado del sistema.', 'success');
         } else {
             const err = await resp.json();
-            Swal.fire('No se pudo eliminar', err.detail || 'Error desconocido', 'error');
+            Swal.fire('No se pudo eliminar', detalleError(err, 'Error desconocido'), 'error');
         }
     } catch (e) {
         console.error("Error al eliminar trabajo:", e);
@@ -165,7 +165,7 @@ async function guardarTrabajo(e) {
             descripcion_producto: desc,
             precio_venta: parseFloat(document.getElementById('ft_precio').value),
             notas_iniciales: notas || null,
-            fecha_creacion: new Date().toISOString().split('T')[0],
+            fecha_creacion: fechaHoyLocal(),
             estado: "Aprobado",
             // Datos de la orden de producción (todos opcionales)
             papel_id: opt('ft_papel_id'),
@@ -316,7 +316,7 @@ async function soltarTarjeta(ev, nuevoEstado) {
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "El backend rechazó el cambio de estado.");
+            throw new Error(detalleError(err, "El backend rechazó el cambio de estado."));
         }
         refrescarTablero();
     } catch (error) {
@@ -391,7 +391,7 @@ async function iniciarDisenoDesdeKanban(id) {
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail?.[0]?.msg || err.detail || "No se pudo iniciar el diseño.");
+            throw new Error(detalleError(err, "No se pudo iniciar el diseño."));
         }
         refrescarTablero();
     } catch (error) {
@@ -429,7 +429,7 @@ async function pasarAProduccionDesdeKanban(id) {
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "El backend rechazó el cambio.");
+            throw new Error(detalleError(err, "El backend rechazó el cambio."));
         }
         refrescarTablero();
     } catch (error) {
@@ -452,7 +452,9 @@ async function descargarOrden(id, forzar = false) {
             if (resp.status === 400 && !forzar) {
                 const r = await Swal.fire({
                     title: 'Stock de papel insuficiente',
-                    text: (err.detail || '') + ' ¿Emitir la orden igual? (el stock quedará en negativo)',
+                    // Sin default: el detalle se concatena con la pregunta, y el
+                    // texto genérico de detalleError() rompería la frase.
+                    text: detalleError(err, '') + ' ¿Emitir la orden igual? (el stock quedará en negativo)',
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: 'Emitir igual',
@@ -461,7 +463,7 @@ async function descargarOrden(id, forzar = false) {
                 if (r.isConfirmed) return descargarOrden(id, true);
                 return false;
             }
-            throw new Error(err.detail || "No se pudo generar la orden.");
+            throw new Error(detalleError(err, "No se pudo generar la orden."));
         }
 
         const blob = await resp.blob();
@@ -603,7 +605,7 @@ async function cancelarTrabajo(id) {
         });
         if (!resp.ok) {
             const error = await resp.json().catch(() => ({}));
-            Swal.fire('No se pudo cancelar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
+            Swal.fire('No se pudo cancelar', detalleError(error), 'error');
             return;
         }
         cargarTrabajos();
@@ -643,7 +645,7 @@ async function reactivarTrabajo(id) {
         });
         if (!resp.ok) {
             const error = await resp.json().catch(() => ({}));
-            Swal.fire('No se pudo reactivar', error.detail || 'Revisá los datos e intentá de nuevo.', 'error');
+            Swal.fire('No se pudo reactivar', detalleError(error), 'error');
             return;
         }
         cargarTrabajos();

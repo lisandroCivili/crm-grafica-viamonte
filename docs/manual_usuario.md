@@ -16,8 +16,8 @@ Al abrir el sistema aparece una pantalla de login. Se ingresa con usuario y
 contraseña provistos por quien administra el sistema.
 
 Una vez adentro, el menú lateral izquierdo tiene una sección por módulo:
-Dashboard, Trabajos, Presupuestos, Clientes, Cheques, Gastos y Stock. Al pie
-del menú hay dos acciones siempre disponibles:
+Dashboard, Trabajos, Presupuestos, Clientes, Cheques, Gastos, Stock y
+Asistencia. Al pie del menú hay dos acciones siempre disponibles:
 
 - **Descargar Respaldo**: descarga un archivo con una copia completa de la
   base de datos del sistema a la fecha. Sirve como resguardo ante un problema
@@ -320,7 +320,69 @@ Pagar" (plata que va a salir).
 
 ---
 
-## 9. Dashboard (Panel de Control)
+## 9. Asistencia
+
+Registro de la jornada de cada empleado: a qué hora entró y a qué hora salió,
+día por día. El sistema calcula solo las horas trabajadas y permite sacar el
+total de un período.
+
+### Cómo se usa
+
+- Arriba a la derecha está el selector de **Día**. Arranca en la fecha de hoy;
+  cambiarlo trae la planilla de ese día.
+- La tabla muestra **una fila por empleado activo**, aunque todavía no tenga
+  nada cargado. Se completan **Entrada** y **Salida**, y la columna **Horas** se
+  actualiza sola.
+- La columna **Observaciones** es texto libre para lo que no entra en un
+  horario: "franco", "faltó", "se fue al mediodía", "vino a la tarde".
+- **💾 Guardar día** guarda la planilla **completa** de una sola vez. No hay que
+  guardar empleado por empleado.
+- Se puede guardar el mismo día varias veces: cargar la entrada a la mañana y
+  volver a la tarde para completar la salida. El segundo guardado **actualiza**
+  la fila, no la duplica.
+- Para **borrar** una carga equivocada, se vacían los tres campos de esa fila y
+  se guarda el día: la fila queda sin registro.
+- Abajo está **Total de horas por período**: se eligen dos fechas y "Ver total"
+  muestra, por empleado, cuántos días trabajó y el total de horas.
+
+### Alta y baja de empleados
+
+El botón **👥 Empleados** abre el panel lateral de administración:
+
+- Escribir el nombre y **Agregar** da de alta a alguien nuevo. Desde el
+  siguiente guardado ya aparece en la planilla del día.
+- **✏️** permite corregir un nombre mal escrito.
+- **Dar de baja** es lo que corresponde cuando alguien deja de trabajar en el
+  taller. Sale de la planilla del día, pero **las horas que ya trabajó no se
+  pierden**: siguen apareciendo en los totales de los meses en que estuvo. Si
+  vuelve, **Reactivar** lo pone de nuevo en la planilla.
+- **🗑️** borra al empleado de verdad, y sólo funciona si **nunca** se le cargó
+  un día. Sirve para deshacer un alta equivocada (un nombre repetido, por
+  ejemplo), no para dar de baja a alguien que trabajó.
+
+> **¿Por qué funciona así?**
+> Dar de baja y borrar son cosas distintas a propósito. Si borrar a un empleado
+> se llevara puesto su historial, los totales de horas de los meses anteriores
+> cambiarían de golpe y ya no coincidirían con lo que se pagó en su momento. Es
+> el mismo criterio que protege a los movimientos de cuenta corriente y al
+> historial de stock: lo que ya pasó no se toca.
+
+> **¿Por qué funciona así?**
+> Las horas no se cargan a mano, se calculan a partir de la entrada y la salida.
+> Así no pueden quedar desfasadas: si se corrige un horario, el total se rehace
+> solo. Por eso tampoco se acepta una hora de salida anterior a la de entrada —
+> en el taller no hay turno noche, así que eso es siempre un error de tipeo
+> (18:00 tecleado como 8:00), y dejarlo pasar metería una jornada falsa en el
+> total del mes.
+
+> **¿Por qué funciona así?**
+> El total del período cuenta sólo los días con la **jornada completa**. Un día
+> con la entrada cargada pero sin la salida no aporta horas, así que tampoco
+> suma como día trabajado: si contara, el promedio de horas por día saldría mal.
+
+---
+
+## 10. Dashboard (Panel de Control)
 
 El dashboard resume la caja y la producción del taller. Tiene un selector de
 período (Este Mes, Mes Pasado, Este Año, Histórico) que afecta a los KPIs
@@ -360,7 +422,7 @@ aviso de error.
 
 ---
 
-## 10. Preguntas frecuentes y mensajes de error comunes
+## 11. Preguntas frecuentes y mensajes de error comunes
 
 **"Este DNI/CUIT ya está registrado."**
 Ya existe un cliente con ese número. Buscalo en el listado en vez de crear
@@ -416,3 +478,19 @@ cliente no tiene plata a favor para aplicar.
 **Dashboard con los indicadores en "—".**
 El backend no respondió. Verificá que el sistema esté corriendo y recargá la
 página — no es que no hubo movimiento en el período.
+
+**"Revisá los horarios" / "La hora de salida tiene que ser posterior a la de
+entrada."**
+En Asistencia hay alguien con la salida cargada antes que la entrada. Suele
+ser un error de tipeo (18:00 escrito como 8:00).
+
+**"No se puede eliminar: [nombre] tiene N día(s) de asistencia cargados."**
+Estás intentando borrar un empleado que ya trabajó. Usá **Dar de baja** en su
+lugar: sale de la planilla pero no se pierde el historial de horas.
+
+**En Asistencia falta un empleado en la planilla.**
+Está dado de baja. Abrí **👥 Empleados** y tocá **Reactivar**.
+
+**En Asistencia, la columna Horas muestra "—".**
+Falta cargar la entrada o la salida de esa fila. Con la jornada incompleta no
+hay horas que calcular, y ese día tampoco suma en el total del período.

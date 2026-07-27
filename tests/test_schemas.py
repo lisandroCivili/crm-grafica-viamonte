@@ -5,7 +5,7 @@ calculos.py. Se prueban contra el schema directo (sin TestClient) porque lo que
 importa acá es la validación, no el transporte HTTP: FastAPI convierte
 cualquier ValidationError en un 422.
 """
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 
 import pytest
@@ -140,3 +140,63 @@ class TestPagoSinTrabajo:
             metodo="Efectivo", descripcion="Pago a cuenta",
         )
         assert m.trabajo_id is None
+
+
+# --- Caso 6: los horarios de una fila de asistencia -------------------------
+
+class TestHorariosDeAsistencia:
+    """La salida tiene que ser posterior a la entrada.
+
+    No se contempla el turno que cruza la medianoche porque en el taller no
+    existe: una salida anterior a la entrada es un error de tipeo, y dejarlo
+    pasar mete un día raro en el total de horas del mes.
+    """
+
+    def test_una_jornada_normal_pasa(self):
+        fila = schemas.FilaPlanillaGuardar(
+            empleado_id="E1", hora_entrada=time(8, 0), hora_salida=time(17, 0),
+        )
+        assert fila.hora_salida == time(17, 0)
+
+    def test_una_salida_anterior_a_la_entrada_se_rechaza(self):
+        with pytest.raises(ValidationError, match="posterior"):
+            schemas.FilaPlanillaGuardar(
+                empleado_id="E1", hora_entrada=time(17, 0), hora_salida=time(8, 0),
+            )
+
+    def test_entrar_y_salir_a_la_misma_hora_se_rechaza(self):
+        with pytest.raises(ValidationError, match="posterior"):
+            schemas.FilaPlanillaGuardar(
+                empleado_id="E1", hora_entrada=time(8, 0), hora_salida=time(8, 0),
+            )
+
+    def test_una_entrada_sin_salida_pasa(self):
+        # El empleado entró y todavía no salió: la planilla se guarda igual.
+        fila = schemas.FilaPlanillaGuardar(empleado_id="E1", hora_entrada=time(8, 0))
+        assert fila.hora_salida is None
+
+    def test_una_fila_vacia_pasa(self):
+        # Es la fila de alguien que no vino. El router la usa para borrar un
+        # registro anterior cargado por error.
+        fila = schemas.FilaPlanillaGuardar(empleado_id="E1")
+        assert fila.hora_entrada is None and fila.hora_salida is None
+
+    def test_una_fila_solo_con_observaciones_pasa(self):
+        fila = schemas.FilaPlanillaGuardar(empleado_id="E1", observaciones="Franco")
+        assert fila.observaciones == "Franco"
+
+    def test_la_fila_expone_las_horas_calculadas(self):
+        fila = schemas.FilaPlanillaResponse(
+            empleado_id="E1", nombre="Eduardo",
+            hora_entrada=time(8, 0), hora_salida=time(16, 30),
+        )
+        assert fila.horas == Decimal("8.50")
+
+    def test_las_horas_no_se_reciben_desde_afuera(self):
+        # Son campo calculado: mandarlas no las pisa. Es lo que evita que un
+        # total quede desfasado del horario que lo produjo.
+        fila = schemas.FilaPlanillaResponse(
+            empleado_id="E1", nombre="Eduardo",
+            hora_entrada=time(8, 0), hora_salida=time(17, 0), horas=Decimal("99"),
+        )
+        assert fila.horas == Decimal("9.00")

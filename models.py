@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Date, DateTime, ForeignKey, JSON, Text, Boolean
+from sqlalchemy import Column, String, Integer, Date, DateTime, Time, ForeignKey, JSON, Text, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 from money import Money, Cantidad
@@ -263,3 +263,51 @@ class HistorialCheque(Base):
     estado_nuevo = Column(String, nullable=True)
     detalle = Column(String, nullable=False) # Ej: "monto 5000 -> 6000" o el motivo de una reversión
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class Empleado(Base):
+    """Persona que trabaja en el taller y a la que se le carga asistencia.
+
+    No se borra nunca si ya tiene asistencia cargada: se da de baja con
+    activo=False. Un empleado inactivo desaparece de la planilla del día, pero
+    sus horas históricas siguen existiendo y siguen sumando en los resúmenes de
+    períodos anteriores. Es el mismo criterio de trazabilidad que protege a
+    Movimiento y al historial de stock: el dato pasado no se toca.
+    """
+    __tablename__ = "empleados"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    nombre = Column(String, nullable=False)
+    activo = Column(Boolean, default=True)
+
+    registros = relationship("RegistroAsistencia", back_populates="empleado")
+
+class RegistroAsistencia(Base):
+    """Un día de trabajo de un empleado: a qué hora entró y a qué hora salió.
+
+    Un solo tramo por día y por empleado. La jornada partida (se fue al mediodía
+    y volvió) se anota en observaciones, no se parte en dos filas.
+
+    Las horas son nullable a propósito: la planilla tiene que poder guardar una
+    fila con sólo observaciones ('franco', 'faltó') o con la entrada cargada
+    mientras el empleado todavía no salió.
+
+    Las horas trabajadas NO se guardan: se derivan de entrada y salida en
+    calculos.horas_trabajadas, igual que el total de un presupuesto se deriva de
+    sus ítems. Persistirlas abriría la puerta a que queden desfasadas si se
+    corrige un horario.
+    """
+    __tablename__ = "registros_asistencia"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    empleado_id = Column(String, ForeignKey("empleados.id"), nullable=False)
+    fecha = Column(Date, nullable=False, index=True)
+    hora_entrada = Column(Time, nullable=True)
+    hora_salida = Column(Time, nullable=True)
+    observaciones = Column(Text, nullable=True)
+
+    empleado = relationship("Empleado", back_populates="registros")
+
+    # Un empleado no puede tener dos registros el mismo día. El router igual
+    # hace upsert, así que en la práctica esto no se dispara: está para que una
+    # planilla enviada dos veces no pueda duplicar filas ni por error.
+    __table_args__ = (
+        UniqueConstraint("empleado_id", "fecha", name="uq_asistencia_empleado_fecha"),
+    )

@@ -413,7 +413,7 @@ async function guardarPresupuestoModerno(e) {
             const resp = await fetch(`${API_URL}/presupuestos/${idPresupuestoEditando}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEdicion) });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                Swal.fire('No se pudo guardar', err.detail || 'Error desconocido', 'error');
+                Swal.fire('No se pudo guardar', detalleError(err, 'Error desconocido'), 'error');
                 return;
             }
             cerrarModalPresupuesto();
@@ -425,13 +425,13 @@ async function guardarPresupuestoModerno(e) {
                 trabajo_asociado_id: document.getElementById('mp_trabajo_id').value || null,
                 version_de: idPresupuestoVersionDe,
                 estado: document.getElementById('mp_estado').value,
-                fecha_creacion: new Date().toISOString().split('T')[0],
+                fecha_creacion: fechaHoyLocal(),
                 items,
             };
             const respNuevo = await fetch(`${API_URL}/presupuestos/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!respNuevo.ok) {
                 const err = await respNuevo.json().catch(() => ({}));
-                Swal.fire('No se pudo guardar', err.detail || 'Error desconocido', 'error');
+                Swal.fire('No se pudo guardar', detalleError(err, 'Error desconocido'), 'error');
                 return;
             }
             cerrarModalPresupuesto();
@@ -472,7 +472,7 @@ async function eliminarPresupuesto(id, button) {
             Swal.fire('¡Eliminado!', 'El presupuesto fue borrado del sistema.', 'success');
         } else {
             const err = await resp.json();
-            Swal.fire('No se pudo eliminar', err.detail || 'Error desconocido', 'error');
+            Swal.fire('No se pudo eliminar', detalleError(err, 'Error desconocido'), 'error');
         }
     } catch (e) {
         console.error("Error al eliminar presupuesto:", e);
@@ -615,7 +615,7 @@ async function convertirATrabajo(presupuesto_id, button) {
         const resp = await fetch(`${API_URL}/presupuestos/${presupuesto_id}/convertir`, { method: 'POST' });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "No se pudo convertir el presupuesto.");
+            throw new Error(detalleError(err, "No se pudo convertir el presupuesto."));
         }
 
         // La conversión ya está hecha: si falla la cancelación de algún trabajo
@@ -681,7 +681,7 @@ async function generarPDFCliente(presupuesto_id) {
         const resp = await fetch(`${API_URL}/presupuestos/${presupuesto_id}/pdf-cliente`);
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "No se pudo generar el PDF.");
+            throw new Error(detalleError(err, "No se pudo generar el PDF."));
         }
 
         const dispo = resp.headers.get('Content-Disposition') || '';
@@ -808,7 +808,7 @@ async function generarInformeTrabajosPDF() {
             }
         });
 
-        doc.save(`Informe_Trabajos_Clientes_${new Date().toISOString().split('T')[0]}.pdf`);
+        doc.save(`Informe_Trabajos_Clientes_${fechaHoyLocal()}.pdf`);
     } catch (e) {
         console.error(e);
         Swal.fire('No se pudo generar el informe', e.message, 'error');

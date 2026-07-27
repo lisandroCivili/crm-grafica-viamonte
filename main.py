@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
 # Importamos todos los routers modulares que creamos
-from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes
+from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes, empleados, asistencia
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
@@ -47,6 +47,8 @@ app.include_router(cheques.router)
 app.include_router(notas.router)
 app.include_router(movimientos.router)
 app.include_router(reportes.router)
+app.include_router(empleados.router)
+app.include_router(asistencia.router)
 app.include_router(auth.router)  # Incluimos el router de autenticación
 
 # ==========================================

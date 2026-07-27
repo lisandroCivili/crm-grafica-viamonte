@@ -354,3 +354,29 @@ def total_gastos_operativos(
             continue
         total += Q2(g.monto)
     return Q2(total)
+
+
+def horas_trabajadas(hora_entrada, hora_salida) -> Optional[Decimal]:
+    """Horas de una jornada, en decimal: 8.50 son ocho horas y media.
+
+    Devuelve None si el registro está incompleto. Sin entrada o sin salida no
+    hay jornada que medir, y un 0 se confundiría con "vino y no trabajó": el
+    resumen del período tiene que poder distinguir el día a medio cargar del día
+    que efectivamente no sumó horas.
+
+    Decimal y no un texto "8:30" porque estas horas se suman entre sí. El
+    formato lindo lo arma el frontend.
+
+    Una salida anterior a la entrada la rechaza el schema, que corta con un 422
+    antes de que el dato llegue a la base (no hay turno noche en el taller: si
+    la salida da antes, es un error de tipeo). Acá se devuelve cero por si
+    alguna vez entra un registro así por ORM -un test, una migración-: sumar un
+    negativo le restaría horas a los otros días del resumen.
+    """
+    if hora_entrada is None or hora_salida is None:
+        return None
+    entrada = datetime.combine(date.min, hora_entrada)
+    salida = datetime.combine(date.min, hora_salida)
+    if salida <= entrada:
+        return CERO
+    return Q2(Decimal((salida - entrada).total_seconds()) / Decimal(3600))

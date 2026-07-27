@@ -90,7 +90,7 @@ async function guardarPago(e) {
                     banco: banco,
                     numero: numero,
                     monto: monto,
-                    fecha_emision: new Date().toISOString().split('T')[0],
+                    fecha_emision: fechaHoyLocal(),
                     fecha_cobro: fechaCobro,
                     estado: "En Cartera"
                 })
@@ -172,7 +172,7 @@ async function editarMovimiento(id) {
             cargarClientes();
         } else {
             const err = await resp2.json();
-            Swal.fire('No se pudo guardar', err.detail || 'Error desconocido', 'error');
+            Swal.fire('No se pudo guardar', detalleError(err, 'Error desconocido'), 'error');
         }
     } catch (e) { console.error("Error al editar movimiento:", e); }
 }

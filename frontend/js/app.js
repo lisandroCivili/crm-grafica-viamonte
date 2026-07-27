@@ -108,6 +108,8 @@ function iniciarApp() {
     cargarGastos();
     cargarStock();
     cargarCheques();
+    cargarPlanilla();
+    inicializarPeriodoResumen();
     cargarManual();
 }
 

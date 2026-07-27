@@ -25,8 +25,15 @@ h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 700; margin-
 #sidebar { width: var(--sidebar-w); background: var(--ink); color: #fff; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
 .brand { padding: 24px 20px; border-bottom: 1px solid rgba(255,255,255,.08); }
 .brand-name { font-family: 'Space Grotesk'; font-size: 18px; color: var(--magenta); }
-nav { flex: 1; padding: 20px 12px; }
-.nav-item { display: flex; gap: 12px; padding: 12px 14px; margin-bottom: 4px; border-radius: 8px; color: rgba(255,255,255,.7); cursor: pointer; font-weight: 500; }
+/* Flex column: es lo que hace funcionar el 'margin-top:auto' del bloque de
+   Respaldo/Cerrar Sesión, que empuja ese grupo al pie del sidebar.
+   min-height:0 + overflow-y son necesarios juntos: un flex item no se encoge
+   por debajo de su contenido salvo que se le anule el min-height automático, y
+   sin eso el menú se cortaba abajo en pantallas bajas en vez de scrollear. */
+nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 12px; display: flex; flex-direction: column; }
+/* flex-shrink:0 para que los ítems mantengan su alto y scrollee el menú: si no,
+   se comprimen entre sí hasta quedar ilegibles. */
+.nav-item { display: flex; gap: 12px; padding: 12px 14px; margin-bottom: 4px; border-radius: 8px; color: rgba(255,255,255,.7); cursor: pointer; font-weight: 500; flex-shrink: 0; }
 .nav-item:hover { background: rgba(255,255,255,.05); color: #fff; }
 .nav-item.active { background: var(--magenta); color: #fff; }
 

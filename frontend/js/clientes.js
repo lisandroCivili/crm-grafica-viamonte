@@ -281,7 +281,7 @@ async function guardarEdicionCliente(e) {
             Swal.fire({ title: 'Cliente actualizado', icon: 'success', timer: 1000, showConfirmButton: false });
         } else {
             const err = await resp.json();
-            Swal.fire('No se pudo guardar', err.detail || 'Error desconocido', 'error');
+            Swal.fire('No se pudo guardar', detalleError(err, 'Error desconocido'), 'error');
         }
     } finally {
         restore();
@@ -317,7 +317,7 @@ async function eliminarCliente(id, button) {
             Swal.fire('¡Eliminado!', 'El cliente fue borrado del sistema.', 'success');
         } else {
             const err = await resp.json();
-            Swal.fire('No se pudo eliminar', err.detail || 'Error desconocido', 'error');
+            Swal.fire('No se pudo eliminar', detalleError(err, 'Error desconocido'), 'error');
         }
     } catch (e) {
         console.error("Error al eliminar cliente:", e);
