@@ -11,8 +11,14 @@ from calculos import (
     ingresos_reales, ingresos_sin_imputar, ganancia_bruta_realizada,
     total_gastos, total_gastos_operativos, calcular_saldo_trabajo,
 )
+from seguridad import solo_admin
 
-router = APIRouter(prefix="/api/reportes", tags=["Reportes"])
+# Módulo entero del dueño: ingresos, egresos, ganancia neta y morosos.
+router = APIRouter(
+    prefix="/api/reportes",
+    tags=["Reportes"],
+    dependencies=[Depends(solo_admin)],
+)
 
 # Trabajos que siguen "vivos" en el taller (no entregados ni cancelados).
 ESTADOS_PENDIENTES = {"Aprobado", "En Diseño", "En Producción"}

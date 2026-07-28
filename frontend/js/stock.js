@@ -340,7 +340,7 @@ async function cargarStock() {
                     <td style="text-align:center;">${badgeEstado}</td>
                     <td style="text-align:center;">
                         <button class="btn secondary" style="font-size:12px; padding:6px;" onclick="editarArticuloStock('${s.id}')">✏️</button>
-                        <button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarArticuloStock('${s.id}', this)">🗑️</button>
+                        ${permisos().borrar ? `<button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarArticuloStock('${s.id}', this)">🗑️</button>` : ''}
                     </td>
                 </tr>
             `;

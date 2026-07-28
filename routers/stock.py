@@ -6,8 +6,16 @@ from database import get_db
 from datetime import date
 from money import Q2, Q3
 from routers._comun import obtener_o_404
+from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin
 
-router = APIRouter(prefix="/api/stock", tags=["Stock"])
+# Entran los tres puestos: el papel lo controla y lo repone el taller, no el
+# dueño. Borrar un artículo sí queda sólo para el dueño (se lleva puesto el
+# historial de movimientos de ese papel).
+router = APIRouter(
+    prefix="/api/stock",
+    tags=["Stock"],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+)
 
 # (Largo cm x Ancho cm x Gramaje grs) / 10.000.000 = peso de 1 pliego en Kg
 DIVISOR_PESO_PLIEGO = Decimal("10000000")
@@ -210,7 +218,7 @@ def ver_historial(articulo_id: str, db: Session = Depends(get_db)):
     # Trae los movimientos del más nuevo al más viejo
     return db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).order_by(models.HistorialStock.fecha.desc()).all()
 
-@router.delete("/{articulo_id}")
+@router.delete("/{articulo_id}", dependencies=[Depends(solo_admin)])
 def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
     db_art = obtener_o_404(db, models.ArticuloStock, articulo_id, "Artículo no encontrado")
 

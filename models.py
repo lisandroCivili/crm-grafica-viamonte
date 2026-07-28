@@ -318,3 +318,33 @@ class RegistroAsistencia(Base):
     __table_args__ = (
         UniqueConstraint("empleado_id", "fecha", name="uq_asistencia_empleado_fecha"),
     )
+
+class Usuario(Base):
+    """Quién entra al sistema y con qué alcance.
+
+    El rol es un PUESTO (ver ROLES en seguridad.py), no una persona: el día que
+    cambie el personal se da de baja el usuario y se crea otro con el mismo rol,
+    sin tocar una línea de código. El nombre sí es la persona, para que la
+    auditoría pueda decir quién hizo cada cosa.
+
+    No se borra nunca: se da de baja con activo=False, mismo criterio que
+    Empleado. Un usuario borrado dejaría sin autor lo que haya hecho.
+
+    Separado de Empleado a propósito: Empleado es a quien se le carga asistencia
+    (puede no tener acceso al sistema) y Usuario es quien se loguea (puede no
+    fichar). Quien sea las dos cosas se vincula por empleado_id.
+    """
+    __tablename__ = "usuarios"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    # El nombre con el que se loguea. Se guarda siempre en minúsculas (lo
+    # normalizan el router y el script de alta) para que 'Marcos' y 'marcos'
+    # sean el mismo usuario y el unique no se pueda esquivar cambiando mayúsculas.
+    nombre = Column(String, nullable=False, unique=True, index=True)
+    password_hash = Column(String, nullable=False)
+    rol = Column(String, nullable=False)
+    activo = Column(Boolean, default=True)
+    fecha_creacion = Column(DateTime, default=ahora_local)
+    ultimo_login = Column(DateTime, nullable=True)
+
+    empleado_id = Column(String, ForeignKey("empleados.id"), nullable=True)
+    empleado = relationship("Empleado")

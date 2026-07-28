@@ -6,12 +6,17 @@ import models, schemas
 from database import get_db
 from calculos import calcular_saldo_cliente
 from routers._comun import obtener_o_404
+from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin
 import uuid
 
-# Instanciamos el router específico para Clientes
+# Instanciamos el router específico para Clientes.
+# Entran los tres puestos: el mostrador da de alta al cliente que llega y
+# corrige un teléfono mal tipeado. Lo que queda sólo para el dueño son los
+# saldos (más abajo) y el borrado.
 router = APIRouter(
     prefix="/api/clientes",
-    tags=["Clientes"]
+    tags=["Clientes"],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
 )
 
 @router.post("/", response_model=schemas.ClienteResponse)
@@ -48,7 +53,11 @@ def listar_clientes(buscar: str = None, db: Session = Depends(get_db)):
 
 # OJO: si algún día se agrega GET /{cliente_id}, esta ruta debe declararse antes
 # para que "saldos" no se interprete como un id de cliente.
-@router.get("/saldos", response_model=list[schemas.SaldoResponse])
+#
+# Sólo el dueño: sumando el total_facturado de esta respuesta sale la
+# facturación histórica completa de la gráfica.
+@router.get("/saldos", response_model=list[schemas.SaldoResponse],
+            dependencies=[Depends(solo_admin)])
 def saldos_clientes(db: Session = Depends(get_db)):
     """Saldo de todos los clientes en una sola respuesta.
 
@@ -109,7 +118,7 @@ def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, d
     db.refresh(db_cliente)
     return db_cliente
 
-@router.delete("/{cliente_id}")
+@router.delete("/{cliente_id}", dependencies=[Depends(solo_admin)])
 def eliminar_cliente(cliente_id: str, db: Session = Depends(get_db)):
     db_cliente = obtener_o_404(db, models.Cliente, cliente_id, "Cliente no encontrado")
 

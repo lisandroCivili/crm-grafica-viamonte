@@ -76,17 +76,18 @@ def _dibujar_fila(c, y, etiqueta, valor, ancho_etiqueta=38 * mm):
     return y - 7 * mm
 
 
-def _dibujar_recuadro_corte(c, y, lado=45 * mm):
+def _dibujar_recuadro_corte(c, y, ancho=60 * mm, alto=40 * mm):
     """Recuadro vacío para que el taller dibuje a mano el esquema de corte.
 
     Sale siempre en blanco: el corte se traza en el momento sobre la boleta, no
     es un dato que el sistema guarde. Va alineado con la columna de los valores
-    de _dibujar_fila, justo debajo de 'Corte de pliego'.
+    de _dibujar_fila, justo debajo de 'Corte de pliego'. Apaisado (más ancho
+    que alto), como la proporción típica de un pliego de papel.
     """
     tope = y + 3 * mm  # el texto de la fila anterior queda apenas arriba del marco
     c.setLineWidth(1)
-    c.rect(MARGEN + 38 * mm, tope - lado, lado, lado, stroke=1, fill=0)
-    return tope - lado - 5 * mm
+    c.rect(MARGEN + 38 * mm, tope - alto, ancho, alto, stroke=1, fill=0)
+    return tope - alto - 5 * mm
 
 
 def _dibujar_seccion(c, y, titulo):

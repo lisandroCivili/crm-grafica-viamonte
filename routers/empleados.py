@@ -3,8 +3,15 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from routers._comun import obtener_o_404
+from seguridad import ROL_ADMIN, ROL_ENCARGADO, requiere_rol, solo_admin
 
-router = APIRouter(prefix="/api/empleados", tags=["Empleados"])
+# Va de la mano con Asistencia: el encargado, que carga la planilla todos los
+# días, tiene que poder agregar al que entró esta semana sin depender del dueño.
+router = APIRouter(
+    prefix="/api/empleados",
+    tags=["Empleados"],
+    dependencies=[Depends(requiere_rol(ROL_ADMIN, ROL_ENCARGADO))],
+)
 
 
 @router.get("/", response_model=list[schemas.EmpleadoResponse])
@@ -48,7 +55,7 @@ def actualizar_empleado(empleado_id: str, empleado_update: schemas.EmpleadoUpdat
     db.refresh(db_empleado)
     return db_empleado
 
-@router.delete("/{empleado_id}")
+@router.delete("/{empleado_id}", dependencies=[Depends(solo_admin)])
 def eliminar_empleado(empleado_id: str, db: Session = Depends(get_db)):
     """Borra un empleado, sólo si nunca se le cargó asistencia.
 

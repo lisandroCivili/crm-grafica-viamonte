@@ -3,8 +3,16 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from routers._comun import obtener_o_404
+from seguridad import TODOS_LOS_ROLES, requiere_rol
 
-router = APIRouter(prefix="/api/notas", tags=["Notas"])
+# Entran los tres puestos: las notas son los post-it de la ficha del cliente
+# ("llamar antes de entregar", "pidió que le avisen cuando esté"), no un
+# registro contable. Por eso acá el borrado tampoco queda sólo para el dueño.
+router = APIRouter(
+    prefix="/api/notas",
+    tags=["Notas"],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+)
 
 @router.post("/", response_model=schemas.NotaResponse)
 def crear_nota(nota: schemas.NotaCreate, db: Session = Depends(get_db)):

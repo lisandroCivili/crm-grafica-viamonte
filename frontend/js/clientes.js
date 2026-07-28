@@ -11,19 +11,26 @@ async function abrirFicha(id) {
     switchFichaTab('trabajos');
 
     try {
+        // La cuenta corriente (movimientos y saldo) es sólo del dueño, así que
+        // para los demás puestos ni se pide: serían dos 403. Ojo que sin esos
+        // datos NO se puede mostrar cuánto debe cada trabajo — más abajo se
+        // omite en vez de calcularlo en cero, que diría "Pagado 100%" sobre
+        // trabajos que en realidad deben plata.
+        const verPlata = puedeVerPlata();
+
         const [respC, respT, respM, respN, respS] = await Promise.all([
             fetch(`${API_URL}/clientes/`),
             fetch(`${API_URL}/trabajos/`),
-            fetch(`${API_URL}/movimientos/${id}`),
+            verPlata ? fetch(`${API_URL}/movimientos/${id}`) : null,
             fetch(`${API_URL}/notas/${id}`),
-            fetch(`${API_URL}/movimientos/saldo/${id}`)
+            verPlata ? fetch(`${API_URL}/movimientos/saldo/${id}`) : null
         ]);
 
         const clientes = await respC.json();
         const todosTrabajos = await respT.json();
-        const movimientos = respM.ok ? await respM.json() : [];
+        const movimientos = respM?.ok ? await respM.json() : [];
         const notas = respN.ok ? await respN.json() : [];
-        const saldoInfo = respS.ok ? await respS.json() : null;
+        const saldoInfo = respS?.ok ? await respS.json() : null;
         
         const cliente = clientes.find(c => c.id === id);
         const trabajos = todosTrabajos.filter(t => t.cliente_id === id);
@@ -52,13 +59,18 @@ async function abrirFicha(id) {
                 .reduce((suma, m) => suma + Number(m.monto), 0);
 
             const saldoTrabajo = Number(t.precio_venta) - pagosDeEsteTrabajo;
-            const textoPago = saldoTrabajo <= 0
-                ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>'
-                : `<span style="color:var(--red); font-weight:600;">Debe: $${fmtMoney(saldoTrabajo)}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${fmtMoney(pagosDeEsteTrabajo)})</span>`;
+            // Sin cuenta corriente no hay nada honesto para decir acá: el precio
+            // viene en null y los pagos no se pidieron, así que la cuenta daría
+            // "Pagado 100%" sobre cualquier trabajo.
+            const textoPago = !verPlata
+                ? ''
+                : (saldoTrabajo <= 0
+                    ? '<span style="color:var(--green); font-weight:600;">Pagado 100%</span>'
+                    : `<span style="color:var(--red); font-weight:600;">Debe: $${fmtMoney(saldoTrabajo)}</span> <span style="font-size:11px; color:var(--muted);">(Abonó: $${fmtMoney(pagosDeEsteTrabajo)})</span>`);
 
             // El trabajo debe plata y el cliente tiene saldo a favor (saldo < 0):
             // se ofrece cubrirlo con ese crédito sin cargar un pago nuevo.
-            const puedeAplicarSaldoFavor = saldoTrabajo > 0 && saldoReal < 0
+            const puedeAplicarSaldoFavor = verPlata && saldoTrabajo > 0 && saldoReal < 0
                 && t.estado !== 'Cancelado';
             const btnSaldoFavor = puedeAplicarSaldoFavor
                 ? `<button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--green); color:var(--green);" onclick="aplicarSaldoFavor('${t.id}')">💰 Aplicar saldo a favor</button>`
@@ -68,7 +80,7 @@ async function abrirFicha(id) {
                 <div class="accordion-item">
                     <div class="accordion-header" onclick="toggleAccordion(this)">
                         <span>#${shortId} - ${t.cantidad}x ${esc(t.descripcion_producto)}</span>
-                        <span style="color:var(--magenta)">$${fmtMoney(t.precio_venta)} ▾</span>
+                        <span style="color:var(--magenta)">${verPlata ? `$${fmtMoney(t.precio_venta)} ` : ''}▾</span>
                     </div>
                     <div class="accordion-body">
                         <p style="margin:0 0 8px 0; display:flex; justify-content:space-between;">
@@ -79,7 +91,7 @@ async function abrirFicha(id) {
                         <p style="margin:0 0 8px 0;"><b>Fecha de comienzo:</b> ${t.fecha_comienzo || '-'}</p>
                         <p style="margin:0 0 8px 0;"><b>Notas iniciales:</b> ${esc(t.notas_iniciales) || 'Ninguna'}</p>
                         <button class="btn secondary" style="margin-top:12px; font-size:12px;" onclick="abrirModalEditarTrabajo('${t.id}')">✏️ Editar Trabajo</button>
-                        <button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--red); color:var(--red);" onclick="eliminarTrabajo('${t.id}', this)">🗑️ Borrar</button>
+                        ${permisos().borrar ? `<button class="btn secondary" style="margin-top:12px; margin-left:8px; font-size:12px; border-color:var(--red); color:var(--red);" onclick="eliminarTrabajo('${t.id}', this)">🗑️ Borrar</button>` : ''}
                         ${btnSaldoFavor}
                     </div>
                 </div>
@@ -168,14 +180,19 @@ async function cargarClientes(filtro = "") {
         let url = `${API_URL}/clientes/`;
         if (filtro) url += `?buscar=${filtro}`;
 
-        // El saldo lo calcula el backend (mismo cálculo que la ficha, cheques incluidos).
+        // El saldo lo calcula el backend (mismo cálculo que la ficha, cheques
+        // incluidos). Es sólo del dueño: sumando esa respuesta sale la
+        // facturación histórica de la gráfica, así que a los demás puestos ni
+        // se les pide (la columna tampoco se les muestra).
+        const verPlata = puedeVerPlata();
+
         const [respC, respS] = await Promise.all([
             fetch(url),
-            fetch(`${API_URL}/clientes/saldos`)
+            verPlata ? fetch(`${API_URL}/clientes/saldos`) : null
         ]);
 
         const clientes = await respC.json();
-        const saldos = respS.ok ? await respS.json() : [];
+        const saldos = respS?.ok ? await respS.json() : [];
 
         const saldoPorCliente = {};
         saldos.forEach(s => saldoPorCliente[s.cliente_id] = Number(s.saldo)); // Decimal llega como string
@@ -192,15 +209,15 @@ async function cargarClientes(filtro = "") {
                   <td><b>${esc(cliente.nombre_completo)}</b></td>
                   <td>${cliente.nombre_empresa || '-'}</td>
                   <td class="tnum">${cliente.dni_cuit}</td>
-                  <td class="tnum" style="color: ${vistaSaldo.color}; font-weight: 600;">
+                  ${verPlata ? `<td class="tnum" style="color: ${vistaSaldo.color}; font-weight: 600;">
                     ${vistaSaldo.monto}
                     ${vistaSaldo.aclaracion ? `<div style="font-size:11px; font-weight:500;">${vistaSaldo.aclaracion}</div>` : ''}
-                  </td>
+                  </td>` : ''}
                   <td>
                     <button class="btn secondary" style="font-size:12px; padding:6px 12px;" onclick="abrirFicha('${cliente.id}')">Ver Ficha</button>
                     <button class="btn" style="background:#25D366; padding:6px; margin-left:4px;" onclick="abrirWhatsApp('${cliente.telefono}')">WA</button>
                     <button class="btn secondary" style="font-size:12px; padding:6px; margin-left:4px;" onclick="abrirModalEditarCliente('${cliente.id}')">✏️</button>
-                    <button class="btn secondary" style="font-size:12px; padding:6px; margin-left:4px; border-color:var(--red); color:var(--red);" onclick="eliminarCliente('${cliente.id}', this)">🗑️</button>
+                    ${permisos().borrar ? `<button class="btn secondary" style="font-size:12px; padding:6px; margin-left:4px; border-color:var(--red); color:var(--red);" onclick="eliminarCliente('${cliente.id}', this)">🗑️</button>` : ''}
                   </td>
                 </tr>
             `;

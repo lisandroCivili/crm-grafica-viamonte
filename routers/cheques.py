@@ -3,8 +3,14 @@ from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
 from routers._comun import obtener_o_404
+from seguridad import solo_admin
 
-router = APIRouter(prefix="/api/cheques", tags=["Cheques"])
+# Módulo entero del dueño: cartera de cheques, bancos y montos.
+router = APIRouter(
+    prefix="/api/cheques",
+    tags=["Cheques"],
+    dependencies=[Depends(solo_admin)],
+)
 
 # Estados finales: el cheque ya impactó la caja (o quedó anulado). Salir de ellos
 # deshace un ingreso, así que exige un motivo que queda asentado en el historial.

@@ -1,13 +1,14 @@
 import models
 import os
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
+from seguridad import solo_admin, usuario_actual
 # Importamos todos los routers modulares que creamos
 from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes, empleados, asistencia
 
@@ -64,7 +65,10 @@ app.include_router(auth.router)  # Incluimos el router de autenticación
 # ==========================================
 # RUTA DE RESPALDO (BACKUP)
 # ==========================================
-@app.get("/api/backup")
+# Sólo el dueño: este endpoint entrega el archivo de la base ENTERA (clientes,
+# precios, saldos, cheques, sueldos) en un solo pedido. Al vivir fuera de los
+# routers se saltea todos los permisos de módulo, así que el candado va acá.
+@app.get("/api/backup", dependencies=[Depends(solo_admin)])
 def descargar_respaldo():
     db_path = os.path.join(BASE_DIR, "viamonte.db")
     
@@ -83,6 +87,9 @@ def descargar_respaldo():
         media_type='application/octet-stream'
     )
 
+# Queda sin token a propósito: es el healthcheck con el que el servidor decide
+# si la app está viva. Si pidiera credenciales, el deploy se marcaría caído.
+# No toca la base ni devuelve datos.
 @app.get("/api/estado")
 def estado_servidor():
     return {
@@ -94,7 +101,8 @@ def estado_servidor():
 # ==========================================
 # MANUAL DE USUARIO
 # ==========================================
-@app.get("/api/manual", response_class=PlainTextResponse)
+@app.get("/api/manual", response_class=PlainTextResponse,
+         dependencies=[Depends(usuario_actual)])
 def obtener_manual():
     """Devuelve el manual de usuario en Markdown crudo; el frontend lo renderiza.
 

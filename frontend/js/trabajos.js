@@ -62,7 +62,6 @@ async function guardarEdicionTrabajo(e) {
         const data = {
             descripcion_producto: nuevaDesc,
             cantidad: nuevaCantidad,
-            precio_venta: nuevoPrecio,
             papel_tipo: opt('fe_papel_tipo'),
             medida_terminado: opt('fe_medida_terminado'),
             medida_pliego: opt('fe_medida_pliego'),
@@ -72,6 +71,12 @@ async function guardarEdicionTrabajo(e) {
             barniz: opt('fe_barniz'),
             otros: opt('fe_otros')
         };
+        // El precio sólo lo manda quien lo ve. Para los demás el campo está
+        // oculto y vacío: mandarlo igual le borraría el precio al trabajo cada
+        // vez que el taller corrige unas tintas. El backend además lo descarta
+        // por su cuenta, porque esto no se puede confiar al navegador.
+        if (puedeVerPlata()) data.precio_venta = nuevoPrecio;
+
         // Papel y pliegos sólo se mandan si no están congelados por la orden impresa.
         if (!document.getElementById('fe_papel_id').disabled) {
             data.papel_id = opt('fe_papel_id');
@@ -512,24 +517,16 @@ function cancelarDatosProduccion() {
     refrescarTablero();
 }
 
-// Segundo tramo del pase a Producción: ofrece imprimir la orden si falta (la
-// emisión descuenta el papel y numera la boleta) y recién ahí cambia el estado.
+// Segundo tramo del pase a Producción: imprime la orden si falta (la emisión
+// descuenta el papel y numera la boleta) y recién ahí cambia el estado. Sin
+// pregunta intermedia: el único llamador es guardarDatosProduccion, y "Guardar
+// y emitir orden" ya es la confirmación explícita del operador.
 async function pasarAProduccionDesdeKanban(id) {
     const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
     const t = trabajos.find(x => x.id === id);
     if (!t) { refrescarTablero(); return; }
 
     if (!t.orden_impresa) {
-        const r = await Swal.fire({
-            title: 'Falta imprimir la orden',
-            text: 'Para mandar el trabajo a producción hay que emitir la orden. ¿La imprimo ahora?',
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonText: 'Imprimir y continuar',
-            cancelButtonText: 'Cancelar'
-        });
-        if (!r.isConfirmed) { refrescarTablero(); return; }
-
         const impreso = await descargarOrden(id);
         if (!impreso) { refrescarTablero(); return; } // stock insuficiente u otro error
     }
@@ -625,10 +622,14 @@ async function descargarRemito(id) {
     }
 }
 async function cargarTrabajos() {
+    // Los presupuestos son sólo del dueño (exponen costo y margen), así que para
+    // los demás puestos ni se piden: sería un 403. Sin ellos no se puede saber
+    // qué trabajo tiene presupuesto, y el distintivo simplemente no se muestra
+    // (es información de rentabilidad, que es justo lo que no les toca ver).
     const [trabajos, clientes, presupuestos] = await Promise.all([
         (await fetch(`${API_URL}/trabajos/`)).json(),
         (await fetch(`${API_URL}/clientes/`)).json(),
-        (await fetch(`${API_URL}/presupuestos/`)).json()
+        puedeVerPlata() ? (await fetch(`${API_URL}/presupuestos/`)).json() : []
     ]);
 
     // Trabajos que ya tienen presupuesto asociado: los demás no aportan ganancia
@@ -668,7 +669,9 @@ async function cargarTrabajos() {
             ? `<span style="font-size:10px; color:var(--green); font-weight:600;">🖨️ ${esc(t.numero_orden)}</span>`
             : '';
         // Distintivo: el trabajo no tiene presupuesto asociado (no suma ganancia).
-        const sinPresupuesto = !trabajosConPresupuesto.has(t.id);
+        // Sin la lista de presupuestos (los puestos que no la piden) no hay forma
+        // de saberlo, y marcarlos todos como "sin presupuesto" seria mentir.
+        const sinPresupuesto = puedeVerPlata() && !trabajosConPresupuesto.has(t.id);
         const badgeSinPresu = sinPresupuesto
             ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#fff3cd; color:#8a6d00; border:1px solid var(--amber); padding:2px 6px; border-radius:4px;">⚠️ Sin presupuesto</span></div>`
             : '';
@@ -696,7 +699,7 @@ async function cargarTrabajos() {
               ${badgeSinPresu}
               <div class="client">${cliente ? esc(cliente.nombre_completo) : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${esc(t.descripcion_producto)}</div>
-              <div class="date">${t.fecha_creacion} - $${fmtMoney(t.precio_venta)}</div>
+              <div class="date">${t.fecha_creacion}${puedeVerPlata() ? ` - $${fmtMoney(t.precio_venta)}` : ''}</div>
               ${acciones}
             </div>
         `;

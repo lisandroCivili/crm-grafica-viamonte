@@ -43,7 +43,13 @@ def db_factory(tmp_path):
 
 @pytest.fixture
 def client(db_factory):
-    """TestClient de la app real, con la base apuntando a la temporal."""
+    """TestClient de la app real, con la base apuntando a la temporal.
+
+    Viene logueado como admin: los endpoints piden token y sin esto todos los
+    tests de todos los routers responderían 401. Lo que se prueba en cada
+    archivo es la lógica del endpoint, no el permiso; los permisos tienen sus
+    propios tests en test_permisos.py, que pisan el header con otro rol.
+    """
     from main import app  # Import tardío: main.py corre create_all al importarse.
 
     def get_db_test():
@@ -54,9 +60,33 @@ def client(db_factory):
             db.close()
 
     app.dependency_overrides[get_db] = get_db_test
+
+    sesion = db_factory()
+    try:
+        admin = crear_usuario(sesion, nombre="admin-de-tests", rol="admin")
+        autorizacion = cabecera_de(admin)
+    finally:
+        sesion.close()
+
     with TestClient(app) as c:
+        c.headers.update(autorizacion)
         yield c
     app.dependency_overrides.clear()
+
+
+def cabecera_de(usuario):
+    """Header Authorization para ese usuario. Pasado como `headers=` en un
+    pedido, pisa el del admin que trae el client por defecto."""
+    from seguridad import crear_token
+
+    return {"Authorization": f"Bearer {crear_token(usuario)}"}
+
+
+def cabecera_rol(db, rol, **overrides):
+    """Crea un usuario con ese rol y devuelve su header, en un solo paso."""
+    datos = dict(nombre=f"usuario-{rol}", rol=rol)
+    datos.update(overrides)
+    return cabecera_de(crear_usuario(db, **datos))
 
 
 @pytest.fixture
@@ -212,6 +242,20 @@ def crear_empleado(db, **overrides):
     db.commit()
     db.refresh(empleado)
     return empleado
+
+
+def crear_usuario(db, password="clave1234", **overrides):
+    """Usuario del sistema. La contraseña se pasa en texto y se guarda hasheada,
+    igual que en el alta real: los tests hacen login con ese mismo texto."""
+    from seguridad import hashear_password
+
+    datos = dict(nombre="tester", rol="admin", activo=True)
+    datos.update(overrides)
+    usuario = models.Usuario(**datos, password_hash=hashear_password(password))
+    db.add(usuario)
+    db.commit()
+    db.refresh(usuario)
+    return usuario
 
 
 def crear_registro_asistencia(db, empleado, **overrides):

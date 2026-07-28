@@ -21,6 +21,11 @@ venv/
 # Variables de entorno
 .env
 
+# Clave con la que se firman los tokens de sesión. La genera seguridad.py la
+# primera vez que arranca el sistema y es distinta en cada instalación:
+# commitearla dejaría que cualquiera con el repo se fabrique un token válido.
+.secret_key
+
 # PyInstaller (empaquetado del .exe)
 build/
 dist/

@@ -4,8 +4,16 @@ import models, schemas
 from calculos import CATEGORIA_COSTO_PRESUPUESTADO
 from database import get_db
 from routers._comun import obtener_o_404
+from seguridad import ROL_ADMIN, ROL_MOSTRADOR, requiere_rol, solo_admin
 
-router = APIRouter(prefix="/api/gastos", tags=["Gastos"])
+# El mostrador carga los gastos del día (el flete, la caja chica). El encargado
+# no tiene esta pestaña. Borrar queda sólo para el dueño: un gasto borrado
+# cambia la ganancia del mes sin dejar rastro.
+router = APIRouter(
+    prefix="/api/gastos",
+    tags=["Gastos"],
+    dependencies=[Depends(requiere_rol(ROL_ADMIN, ROL_MOSTRADOR))],
+)
 
 
 def _validar_costo_presupuestado(categoria: str, trabajo_id: str | None) -> None:
@@ -57,7 +65,7 @@ def actualizar_gasto(gasto_id: str, gasto_update: schemas.GastoUpdate, db: Sessi
     db.refresh(db_gasto)
     return db_gasto
 
-@router.delete("/{gasto_id}")
+@router.delete("/{gasto_id}", dependencies=[Depends(solo_admin)])
 def eliminar_gasto(gasto_id: str, db: Session = Depends(get_db)):
     db_gasto = obtener_o_404(db, models.Gasto, gasto_id, "Gasto no encontrado")
     db.delete(db_gasto)

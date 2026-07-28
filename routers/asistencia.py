@@ -5,8 +5,14 @@ from sqlalchemy.orm import Session
 import models, schemas
 from calculos import CERO, horas_trabajadas
 from database import get_db
+from seguridad import ROL_ADMIN, ROL_ENCARGADO, requiere_rol
 
-router = APIRouter(prefix="/api/asistencia", tags=["Asistencia"])
+# El encargado es quien carga la planilla del taller todos los días.
+router = APIRouter(
+    prefix="/api/asistencia",
+    tags=["Asistencia"],
+    dependencies=[Depends(requiere_rol(ROL_ADMIN, ROL_ENCARGADO))],
+)
 
 
 def _fila_vacia(fila: schemas.FilaPlanillaGuardar) -> bool:

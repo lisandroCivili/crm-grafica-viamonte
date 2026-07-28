@@ -40,19 +40,22 @@
     <!-- SIDEBAR -->
     <aside id="sidebar">
       <div class="brand"><div class="brand-name">Gráfica Viamonte</div></div>
+      <!-- El data-tab permite ocultar las pestañas que no le tocan a cada
+           puesto (ver aplicarPermisos en app.js). Los dos botones de abajo
+           también son .nav-item pero NO llevan data-tab: no abren una sección. -->
       <nav class="nav-menu">
-        <div class="nav-item active" onclick="switchTab('tab-dashboard', this)">📊 Dashboard</div>
-        <div class="nav-item" onclick="switchTab('tab-trabajos', this)">📋 Trabajos</div>
-        <div class="nav-item" onclick="switchTab('tab-presupuestos', this)">💰 Presupuestos</div>
-        <div class="nav-item" onclick="switchTab('tab-clientes', this)">👥 Clientes</div>
-        <div class="nav-item" onclick="switchTab('tab-cheques', this)">🏦 Cheques</div>
-        <div class="nav-item" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
-        <div class="nav-item" onclick="switchTab('tab-stock', this)">📦 Stock</div>
-        <div class="nav-item" onclick="switchTab('tab-asistencia', this)">🕒 Asistencia</div>
-        <div class="nav-item" onclick="switchTab('tab-manual', this)">📖 Manual</div>
+        <div class="nav-item active" data-tab="tab-dashboard" onclick="switchTab('tab-dashboard', this)">📊 Dashboard</div>
+        <div class="nav-item" data-tab="tab-trabajos" onclick="switchTab('tab-trabajos', this)">📋 Trabajos</div>
+        <div class="nav-item" data-tab="tab-presupuestos" onclick="switchTab('tab-presupuestos', this)">💰 Presupuestos</div>
+        <div class="nav-item" data-tab="tab-clientes" onclick="switchTab('tab-clientes', this)">👥 Clientes</div>
+        <div class="nav-item" data-tab="tab-cheques" onclick="switchTab('tab-cheques', this)">🏦 Cheques</div>
+        <div class="nav-item" data-tab="tab-gastos" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
+        <div class="nav-item" data-tab="tab-stock" onclick="switchTab('tab-stock', this)">📦 Stock</div>
+        <div class="nav-item" data-tab="tab-asistencia" onclick="switchTab('tab-asistencia', this)">🕒 Asistencia</div>
+        <div class="nav-item" data-tab="tab-manual" onclick="switchTab('tab-manual', this)">📖 Manual</div>
 
         <div style="margin-top: auto; flex-shrink: 0; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 5px;">
-          <div class="nav-item" style="color: #4dabf7;" onclick="descargarRespaldo(this)">💾 Descargar Respaldo</div>
+          <div class="nav-item solo-admin" style="color: #4dabf7;" onclick="descargarRespaldo(this)">💾 Descargar Respaldo</div>
           <div class="nav-item" style="color: var(--red);" onclick="cerrarSesion()">🚪 Cerrar Sesión</div>
         </div>
       </nav>
@@ -228,7 +231,8 @@
             >
               🖨️ Informe Diario (PDF)
             </button>
-            <button class="btn" onclick="toggleDrawer('drawer-nuevo-trabajo')">
+            <!-- Dar de alta un trabajo exige ponerle precio: es del dueño. -->
+            <button class="btn solo-admin" onclick="toggleDrawer('drawer-nuevo-trabajo')">
               + Nuevo Trabajo
             </button>
           </div>
@@ -325,7 +329,7 @@
                 <th>Cliente / Razón Social</th>
                 <th>Contacto / Empresa</th>
                 <th>DNI / CUIT</th>
-                <th>Saldo Cta Cte</th>
+                <th class="solo-admin">Saldo Cta Cte</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -638,7 +642,7 @@
         </div>
       </div>
 
-      <div class="kpi" style="margin-bottom: 24px; text-align:center;">
+      <div class="kpi solo-admin" style="margin-bottom: 24px; text-align:center;">
         <div class="label">Saldo de Cuenta Corriente</div>
         <div class="value" id="ficha-saldo" style="color:var(--green); font-size: 28px;">$0.00</div>
         <!-- Sólo se completa cuando el saldo está a favor del cliente: sin esto,
@@ -649,7 +653,7 @@
       <!-- PESTAÑAS (TABS) -->
       <div class="tabs-ficha" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--line); padding-bottom: 10px;">
         <button class="btn secondary active" id="btn-tab-trabajos" onclick="switchFichaTab('trabajos')">📋 Trabajos</button>
-        <button class="btn secondary" id="btn-tab-movimientos" onclick="switchFichaTab('movimientos')">💸 Movimientos</button>
+        <button class="btn secondary solo-admin" id="btn-tab-movimientos" onclick="switchFichaTab('movimientos')">💸 Movimientos</button>
         <button class="btn secondary" id="btn-tab-notas" onclick="switchFichaTab('notas')">📝 Notas</button>
       </div>
 
@@ -803,7 +807,7 @@
           <label>Cantidad</label>
           <input type="number" id="fe_cantidad" required>
         </div>
-        <div class="form-group">
+        <div class="form-group solo-admin">
           <label>Precio de Venta ($)</label>
           <input type="number" id="fe_precio" required>
         </div>

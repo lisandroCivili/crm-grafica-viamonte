@@ -9,8 +9,43 @@ from calculos import calcular_saldo_trabajo
 from papel import buscar_papel, validar_papel
 from pdf import construir_orden_pdf, construir_entrega_pdf
 from routers._comun import obtener_o_404
+from seguridad import (
+    ROL_ADMIN,
+    TODOS_LOS_ROLES,
+    requiere_rol,
+    solo_admin,
+    usuario_actual,
+)
 
-router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
+# Entran los tres puestos: el Kanban es la pantalla de producción y el taller
+# vive ahí. Lo que se les esconde no es el trabajo sino la plata del trabajo
+# (ver _trabajo_visible). Dar de alta, borrar y reimputar pagos quedan para el
+# dueño, endpoint por endpoint.
+router = APIRouter(
+    prefix="/api/trabajos",
+    tags=["Trabajos"],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+)
+
+# Los dos campos que no ve el taller. Juntos dan el margen de cada trabajo.
+CAMPOS_DE_PLATA = ("precio_venta", "costo_total_materiales")
+
+
+def _trabajo_visible(trabajo: models.Trabajo, usuario: models.Usuario) -> schemas.TrabajoResponse:
+    """El trabajo tal como lo puede ver ese usuario.
+
+    Se vacían los campos en vez de negar el endpoint entero porque el taller
+    necesita todo lo demás del trabajo (qué es, cuánto, qué papel, para cuándo)
+    y esa es justamente la pantalla donde trabaja.
+
+    Ojo que no alcanza con no pintarlos en el frontend: el Kanban se arma con
+    este JSON y el precio se leería igual abriendo las herramientas del
+    navegador.
+    """
+    respuesta = schemas.TrabajoResponse.model_validate(trabajo)
+    if usuario.rol == ROL_ADMIN:
+        return respuesta
+    return respuesta.model_copy(update={campo: None for campo in CAMPOS_DE_PLATA})
 
 
 def _generar_numero_orden(db: Session) -> str:
@@ -322,7 +357,9 @@ def _aplicar_saldo_favor(db: Session, db_trabajo: models.Trabajo) -> tuple[Decim
     return aplicado, Q2(saldo_pendiente - aplicado)
 
 
-@router.post("/", response_model=schemas.TrabajoResponse)
+# Dar de alta un trabajo exige ponerle precio, así que es del dueño. El taller
+# trabaja sobre trabajos ya creados (o nacidos de un presupuesto convertido).
+@router.post("/", response_model=schemas.TrabajoResponse, dependencies=[Depends(solo_admin)])
 def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db)):
     obtener_o_404(db, models.Cliente, trabajo.cliente_id, "El cliente indicado no existe.")
 
@@ -335,7 +372,12 @@ def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db))
     return nuevo_trabajo
 
 @router.get("/", response_model=list[schemas.TrabajoResponse])
-def listar_trabajos(estado: str = None, sin_presupuesto: bool = False, db: Session = Depends(get_db)):
+def listar_trabajos(
+    estado: str = None,
+    sin_presupuesto: bool = False,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     query = db.query(models.Trabajo)
     # Filtro ideal para el Kanban (ej: traer solo los "En Diseño")
     if estado:
@@ -353,7 +395,7 @@ def listar_trabajos(estado: str = None, sin_presupuesto: bool = False, db: Sessi
             .all()
         }
         trabajos = [t for t in trabajos if t.id not in ids_con_presupuesto]
-    return trabajos
+    return [_trabajo_visible(t, usuario) for t in trabajos]
 
 @router.put("/{trabajo_id}", response_model=schemas.TrabajoResponse)
 def actualizar_trabajo(
@@ -361,6 +403,7 @@ def actualizar_trabajo(
     trabajo_update: schemas.TrabajoUpdate,
     devolver_papel: bool = False,
     db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
 ):
     """Actualiza un trabajo.
 
@@ -372,6 +415,15 @@ def actualizar_trabajo(
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     update_data = trabajo_update.model_dump(exclude_unset=True)
+
+    # Al que no ve el precio tampoco se le acepta que lo mande. No es paranoia:
+    # el formulario de edición manda el trabajo entero, así que si el campo va
+    # oculto o vacío, guardar un cambio de tintas le borraría el precio al
+    # trabajo. Se descartan en silencio porque no es un error del operador:
+    # no eligió mandarlos.
+    if usuario.rol != ROL_ADMIN:
+        for campo in CAMPOS_DE_PLATA:
+            update_data.pop(campo, None)
 
     if trabajo_update.estado:
         _validar_cambio_estado(db_trabajo, trabajo_update.estado)
@@ -418,9 +470,9 @@ def actualizar_trabajo(
 
     db.commit()
     db.refresh(db_trabajo)
-    return db_trabajo
+    return _trabajo_visible(db_trabajo, usuario)
 
-@router.delete("/{trabajo_id}")
+@router.delete("/{trabajo_id}", dependencies=[Depends(solo_admin)])
 def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
@@ -451,12 +503,21 @@ def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{trabajo_id}/iniciar-diseno", response_model=schemas.TrabajoResponse)
-def iniciar_diseno(trabajo_id: str, datos: schemas.IniciarDisenoRequest, db: Session = Depends(get_db)):
+def iniciar_diseno(
+    trabajo_id: str,
+    datos: schemas.IniciarDisenoRequest,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Pasa un trabajo Aprobado a En Diseño registrando lo que abonó el cliente.
 
     El monto no se guarda en el Trabajo: se registra como Movimiento de tipo
     'Pago', que es como el sistema ya calcula los saldos (calculos.py). Puede
     ser un pago parcial. Si no hubo seña, queda el motivo asentado como Nota.
+
+    Lo puede hacer cualquier puesto aunque cree un Movimiento: es el mostrador
+    el que recibe la seña cuando el cliente aprueba el trabajo. Ve lo que entra
+    en ese momento, que no es lo mismo que ver el precio ni el saldo del cliente.
     """
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
@@ -512,15 +573,19 @@ def iniciar_diseno(trabajo_id: str, datos: schemas.IniciarDisenoRequest, db: Ses
 
     db.commit()
     db.refresh(db_trabajo)
-    return db_trabajo
+    return _trabajo_visible(db_trabajo, usuario)
 
 
-@router.post("/{trabajo_id}/aplicar-saldo-favor", response_model=schemas.AplicarSaldoFavorResponse)
+@router.post("/{trabajo_id}/aplicar-saldo-favor", response_model=schemas.AplicarSaldoFavorResponse,
+             dependencies=[Depends(solo_admin)])
 def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
     """Cubre el saldo pendiente de un trabajo con el saldo a favor del cliente.
 
     No crea un pago nuevo (eso duplicaría la plata): re-imputa a este trabajo los
     pagos que ya existen a favor del cliente. Ver _aplicar_saldo_favor.
+
+    Sólo el dueño: mueve pagos ya cargados de un trabajo a otro, y para decidirlo
+    hay que estar viendo la cuenta corriente del cliente.
     """
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 

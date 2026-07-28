@@ -177,7 +177,7 @@ async function cargarEmpleados() {
                     <td style="text-align:right; white-space:nowrap;">
                         <button class="btn secondary" style="font-size:12px; padding:5px;" onclick="editarEmpleado('${emp.id}', '${esc(emp.nombre).replace(/'/g, "\\'")}')">✏️</button>
                         ${botonBaja}
-                        <button class="btn secondary" style="font-size:12px; padding:5px; border-color:var(--red); color:var(--red);" onclick="eliminarEmpleado('${emp.id}', this)">🗑️</button>
+                        ${permisos().borrar ? `<button class="btn secondary" style="font-size:12px; padding:5px; border-color:var(--red); color:var(--red);" onclick="eliminarEmpleado('${emp.id}', this)">🗑️</button>` : ''}
                     </td>
                 </tr>
             `;

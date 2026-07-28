@@ -166,7 +166,7 @@ async function cargarGastos() {
                     <td class="tnum" style="color:var(--red); font-weight:bold;">$ ${fmtMoney(g.monto)}</td>
                     <td style="text-align:center;">
                         <button class="btn secondary" style="font-size:12px; padding:6px;" onclick="editarGasto('${g.id}')">✏️ Editar</button>
-                        <button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarGasto('${g.id}', this)">🗑️ Borrar</button>
+                        ${permisos().borrar ? `<button class="btn secondary" style="font-size:12px; padding:6px; border-color:var(--red); color:var(--red);" onclick="eliminarGasto('${g.id}', this)">🗑️ Borrar</button>` : ''}
                     </td>
                 </tr>
             `;

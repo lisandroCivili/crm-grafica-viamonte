@@ -69,6 +69,12 @@ class TrabajoUpdate(BaseModel):
 
 class TrabajoResponse(TrabajoBase):
     id: str
+    # Se redeclaran como opcionales (en TrabajoBase son obligatorios) porque a
+    # quien no es el dueño se le devuelven en null: el Kanban lo usa todo el
+    # taller y con precio y costo juntos sale el margen del trabajo. Los vacía
+    # _trabajo_visible() en routers/trabajos.py; acá sólo se admite el null.
+    precio_venta: Optional[Decimal] = None
+    costo_total_materiales: Optional[Decimal] = None
     # Campos de solo lectura: los controla el backend al imprimir la orden o al
     # cancelarla, por eso no están en TrabajoBase (nadie los manda desde afuera).
     orden_impresa: bool = False
