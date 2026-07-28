@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from arranque import sembrar_usuarios_iniciales
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
 from seguridad import solo_admin, usuario_actual
@@ -14,6 +15,13 @@ from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, mo
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
+
+# En el servidor la base nace vacía y no hay consola para correr el script que
+# da de alta a los usuarios: sin esto, el sistema queda deployado y nadie puede
+# entrar. En la compu del taller no hace nada (esas variables no existen ahí).
+_usuarios_creados = sembrar_usuarios_iniciales()
+if _usuarios_creados:
+    print(f"Usuarios dados de alta en este arranque: {', '.join(_usuarios_creados)}")
 
 app = FastAPI(
     title="Gráfica Viamonte — API Local",
