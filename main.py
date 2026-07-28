@@ -27,8 +27,18 @@ app = FastAPI(
 ORIGENES_PERMITIDOS = [
     "http://localhost:5500",   # Live Server de VS Code
     "http://127.0.0.1:5500",   # Live Server (variante 127.0.0.1)
+    "http://localhost:8000",   # Backend local
+    "http://127.0.0.1:8000",   # Backend local (127.0.0.1)
     "null",                    # index.html abierto directamente como archivo (file://)
 ]
+
+# En Railway, agregar el dominio dinámicamente si existe
+RAILWAY_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+if RAILWAY_DOMAIN:
+    ORIGENES_PERMITIDOS.extend([
+        f"https://{RAILWAY_DOMAIN}",
+        f"http://{RAILWAY_DOMAIN}",
+    ])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGENES_PERMITIDOS,
@@ -120,16 +130,28 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    def abrir_navegador():
-        time.sleep(1.5)
-        webbrowser.open("http://127.0.0.1:8000")
+    # En producción (Railway) usar 0.0.0.0 y puerto de variable de entorno
+    # En desarrollo usar localhost:8000
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", 8000))
 
-    print("=" * 60)
-    print(" Gráfica Viamonte — Sistema iniciando...")
-    print(" En unos segundos se va a abrir solo en el navegador.")
-    print(" NO CIERRES ESTA VENTANA mientras estés trabajando.")
-    print(" Para apagar el sistema, cerrá esta ventana.")
-    print("=" * 60)
+    # Solo abrir navegador en desarrollo
+    if host == "127.0.0.1":
+        def abrir_navegador():
+            time.sleep(1.5)
+            webbrowser.open(f"http://{host}:{port}")
 
-    threading.Thread(target=abrir_navegador, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+        print("=" * 60)
+        print(" Gráfica Viamonte — Sistema iniciando...")
+        print(" En unos segundos se va a abrir solo en el navegador.")
+        print(" NO CIERRES ESTA VENTANA mientras estés trabajando.")
+        print(" Para apagar el sistema, cerrá esta ventana.")
+        print("=" * 60)
+
+        threading.Thread(target=abrir_navegador, daemon=True).start()
+    else:
+        print("=" * 60)
+        print(" Gráfica Viamonte — Sistema iniciando en producción...")
+        print("=" * 60)
+
+    uvicorn.run(app, host=host, port=port)
