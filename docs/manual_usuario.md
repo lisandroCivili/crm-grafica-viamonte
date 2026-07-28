@@ -138,7 +138,18 @@ atenuados, con un botón para reactivarlos).
   - Si no alcanza el papel en stock, el sistema avisa cuánto falta y ofrece
     la opción de **forzar** la impresión (para cuando el papel se compra en
     el momento). Forzar deja constancia en el historial de stock.
-- **Pasar a "En Producción"** exige que la orden ya se haya impreso.
+  - Debajo de "Corte de pliego" la boleta trae un **recuadro vacío** para
+    dibujar a mano el esquema de corte, como en el talonario de papel.
+- **Pasar a "En Producción"**: al arrastrar la tarjeta a esa columna se abre
+  el panel **Datos de producción**, con los campos de la boleta física
+  (papel, pliegos, medidas, corte, tintas, troquelado, barniz,
+  observaciones). Viene precargado con lo que ya tenga el trabajo — los que
+  salen de un presupuesto traen el papel pero no el resto, porque esos datos
+  se deciden recién al bajar a máquina. Al confirmar con **Guardar y emitir
+  orden** se guardan los datos, se imprime la orden y recién ahí el trabajo
+  pasa a Producción. Si se cierra el panel sin guardar, la tarjeta no se
+  mueve; si se cancela la impresión, los datos quedan guardados igual pero el
+  trabajo se queda donde estaba (pasar a Producción exige la orden impresa).
 - **Cancelar un trabajo** (botón ✖ en la tarjeta del Kanban): si la orden ya
   estaba impresa, pregunta si hay que **devolver los pliegos al stock**. Esa
   devolución solo pasa una vez, aunque el trabajo se cancele y reactive

@@ -75,6 +75,9 @@ class TrabajoResponse(TrabajoBase):
     numero_orden: Optional[str] = None
     fecha_orden_impresa: Optional[datetime] = None
     papel_devuelto: bool = False
+    remito_impreso: bool = False
+    numero_remito: Optional[str] = None
+    fecha_remito_impreso: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 # Datos que se piden al pasar un trabajo de Aprobado a En Diseño.

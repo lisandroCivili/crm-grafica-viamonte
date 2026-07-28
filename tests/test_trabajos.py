@@ -352,6 +352,79 @@ class TestImprimirOrden:
         assert respuestas.count(200) >= 1, f"Ninguna impresión salió bien: {respuestas}"
 
 
+# --- Datos de producción al pasar a En Producción ---------------------------
+
+class TestDatosDeProduccionDesdeElKanban:
+    """El drawer que se abre al arrastrar una tarjeta a 'En Producción' guarda
+    los datos de la boleta y recién después emite la orden y cambia el estado.
+    Esta clase fija ese contrato de tres pasos, que es el que asume el frontend.
+    """
+
+    DATOS_BOLETA = {
+        "medida_terminado": "9x5 cm",
+        "medida_pliego": "70x100",
+        "corte_pliego": "1/8",
+        "tintas": "4/4",
+        "troquelado": "No",
+        "barniz": "Sectorizado frente",
+        "otros": "Entregar en cajas de 100",
+    }
+
+    def test_el_put_persiste_los_datos_de_la_boleta(self, client, db):
+        # Los trabajos que vienen de un presupuesto llegan sin nada de esto.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json=dict(self.DATOS_BOLETA))
+
+        assert r.status_code == 200
+        db.refresh(trabajo)
+        for campo, valor in self.DATOS_BOLETA.items():
+            assert getattr(trabajo, campo) == valor
+
+    def test_la_secuencia_completa_deja_el_trabajo_en_produccion(self, client, db):
+        cliente = crear_cliente(db)
+        papel = crear_papel(db, cantidad=Decimal("500"))
+        trabajo = crear_trabajo(db, cliente)
+
+        datos = dict(self.DATOS_BOLETA, papel_id=papel.id, cantidad_pliegos=100)
+        assert client.put(f"/api/trabajos/{trabajo.id}", json=datos).status_code == 200
+        assert client.post(f"/api/trabajos/{trabajo.id}/imprimir-orden").status_code == 200
+        assert client.put(f"/api/trabajos/{trabajo.id}",
+                          json={"estado": "En Producción"}).status_code == 200
+
+        db.expire_all()
+        db.refresh(trabajo)
+        assert trabajo.estado == "En Producción"
+        assert trabajo.tintas == "4/4"
+        assert trabajo.numero_orden is not None
+        db.refresh(papel)
+        assert papel.cantidad == Decimal("400.000")
+
+    def test_guardar_los_datos_no_mueve_el_trabajo_por_si_solo(self, client, db):
+        # Por eso el PUT del drawer va sin 'estado': si el operador cancela la
+        # impresión, el trabajo se queda donde estaba pero con los datos ya cargados.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        client.put(f"/api/trabajos/{trabajo.id}", json=dict(self.DATOS_BOLETA))
+
+        db.refresh(trabajo)
+        assert trabajo.estado == "Aprobado"
+        assert trabajo.orden_impresa is not True
+
+    def test_sin_orden_impresa_el_pase_a_produccion_sigue_rechazado(self, client, db):
+        # No-regresión del guard: el drawer no lo esquiva, lo respeta.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}",
+                       json=dict(self.DATOS_BOLETA, estado="En Producción"))
+
+        assert r.status_code == 400
+        assert "orden" in r.json()["detail"].lower()
+
+
 # --- Aplicar saldo a favor a un trabajo -------------------------------------
 
 def _saldo_trabajo(db, trabajo):

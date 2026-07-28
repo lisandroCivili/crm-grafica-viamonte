@@ -76,6 +76,19 @@ def _dibujar_fila(c, y, etiqueta, valor, ancho_etiqueta=38 * mm):
     return y - 7 * mm
 
 
+def _dibujar_recuadro_corte(c, y, lado=45 * mm):
+    """Recuadro vacío para que el taller dibuje a mano el esquema de corte.
+
+    Sale siempre en blanco: el corte se traza en el momento sobre la boleta, no
+    es un dato que el sistema guarde. Va alineado con la columna de los valores
+    de _dibujar_fila, justo debajo de 'Corte de pliego'.
+    """
+    tope = y + 3 * mm  # el texto de la fila anterior queda apenas arriba del marco
+    c.setLineWidth(1)
+    c.rect(MARGEN + 38 * mm, tope - lado, lado, lado, stroke=1, fill=0)
+    return tope - lado - 5 * mm
+
+
 def _dibujar_seccion(c, y, titulo):
     """Título de sección con fondo gris, al estilo de los rubros de la boleta."""
     alto = 6 * mm
@@ -115,6 +128,7 @@ def construir_orden_pdf(trabajo, cliente, articulo_papel=None) -> bytes:
     y = _dibujar_fila(c, y, "Tipo", _nombre_papel(trabajo, articulo_papel))
     y = _dibujar_fila(c, y, "Medida pliego", trabajo.medida_pliego)
     y = _dibujar_fila(c, y, "Corte de pliego", trabajo.corte_pliego)
+    y = _dibujar_recuadro_corte(c, y)
     y = _dibujar_fila(c, y, "Cantidad de pliegos", trabajo.cantidad_pliegos)
     y -= 2 * mm
 

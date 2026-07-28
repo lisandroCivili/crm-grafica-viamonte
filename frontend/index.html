@@ -969,6 +969,66 @@
         </form>
       </div>
 
+      <!-- DRAWER: DATOS DE PRODUCCIÓN -->
+      <!-- Se abre al arrastrar una tarjeta a "En Producción". Es el gemelo del
+           drawer de alta SIN el precio: los trabajos que vienen de un presupuesto
+           nunca pasan por el alta manual y llegan acá sin los datos de la boleta. -->
+      <div id="drawer-datos-produccion" class="drawer">
+        <button class="close-drawer" onclick="cancelarDatosProduccion()">✖</button>
+        <h3>Datos de producción</h3>
+        <p id="fop_titulo" style="font-size:12px; color:var(--muted);"></p>
+        <p style="font-size:12px; color:var(--muted); margin-top:10px;">Se imprimen en la orden de producción. Todos son opcionales.</p>
+        <p id="fop_aviso_impresa" style="display:none; font-size:12px; color:var(--amber); margin-top:10px;">🔒 La orden ya fue impresa: el papel y los pliegos quedaron fijados (descontaron stock).</p>
+
+        <form id="form-datos-produccion" onsubmit="guardarDatosProduccion(event)" style="margin-top: 20px;">
+          <input type="hidden" id="fop_trabajo_id">
+
+          <div class="form-group" style="flex-direction: column; align-items: flex-start;">
+            <label style="margin-bottom: 5px;">Papel (del stock, para descontar)</label>
+            <select id="fop_papel_id" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;"
+                    onchange="sincronizarPliegosConPapel('fop_papel_id', 'fop_cantidad_pliegos')"></select>
+          </div>
+          <div class="form-group">
+            <label>Cantidad de pliegos</label>
+            <input type="number" step="1" min="1" id="fop_cantidad_pliegos" disabled />
+          </div>
+          <div class="form-group">
+            <label>Papel (texto boleta)</label>
+            <input type="text" id="fop_papel_tipo" placeholder="Ej: Obra 90g" />
+          </div>
+          <div class="form-group">
+            <label>Medida terminado</label>
+            <input type="text" id="fop_medida_terminado" placeholder="Ej: 9x5 cm" />
+          </div>
+          <div class="form-group">
+            <label>Medida pliego</label>
+            <input type="text" id="fop_medida_pliego" placeholder="Ej: 70x100" />
+          </div>
+          <div class="form-group">
+            <label>Corte de pliego</label>
+            <input type="text" id="fop_corte_pliego" placeholder="Ej: 1/8" />
+          </div>
+          <div class="form-group">
+            <label>Tintas</label>
+            <input type="text" id="fop_tintas" placeholder="Ej: 4/4" />
+          </div>
+          <div class="form-group">
+            <label>Troquelado</label>
+            <input type="text" id="fop_troquelado" placeholder="Ej: No / Troquel #12" />
+          </div>
+          <div class="form-group">
+            <label>Barniz</label>
+            <input type="text" id="fop_barniz" placeholder="Ej: Sectorizado frente" />
+          </div>
+          <div class="form-group" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+            <label style="margin-bottom: 5px;">Observaciones</label>
+            <textarea id="fop_otros" style="width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; resize: vertical;" rows="2" placeholder="Ej: Entregar en cajas de 100"></textarea>
+          </div>
+
+          <button type="submit" class="btn" style="width:100%; margin-top:20px;">Guardar y emitir orden</button>
+        </form>
+      </div>
+
       <!-- DRAWER: REGISTRAR PAGO -->
     <div id="drawer-nuevo-pago" class="drawer">
       <button class="close-drawer" onclick="toggleDrawer('drawer-nuevo-pago')">✖</button>

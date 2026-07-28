@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from money import Q2, Q3
 from calculos import calcular_saldo_trabajo
 from papel import buscar_papel, validar_papel
-from pdf import construir_orden_pdf
+from pdf import construir_orden_pdf, construir_entrega_pdf
 from routers._comun import obtener_o_404
 
 router = APIRouter(prefix="/api/trabajos", tags=["Trabajos"])
@@ -36,6 +36,30 @@ def _generar_numero_orden(db: Session) -> str:
         return f"OP-{nuevo_numero}"
 
     return "OP-000001"
+
+
+def _generar_numero_remito(db: Session) -> str:
+    """Número correlativo del remito: RE-000001, RE-000002...
+
+    Mismo criterio que _generar_numero_orden, con prefijo propio para no
+    confundir un remito con una orden de producción o un presupuesto.
+    """
+    ultimo = (
+        db.query(models.Trabajo)
+        .filter(models.Trabajo.numero_remito.isnot(None))
+        .order_by(models.Trabajo.numero_remito.desc())
+        .first()
+    )
+
+    if not ultimo or not ultimo.numero_remito:
+        return "RE-000001"
+
+    partes = ultimo.numero_remito.split("-")
+    if len(partes) == 2:
+        nuevo_numero = str(int(partes[1]) + 1).zfill(6)
+        return f"RE-{nuevo_numero}"
+
+    return "RE-000001"
 
 
 def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str):
@@ -565,4 +589,47 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="orden_{db_trabajo.numero_orden}.pdf"'},
+    )
+
+
+@router.post("/{trabajo_id}/orden-entrega")
+def orden_entrega(trabajo_id: str, db: Session = Depends(get_db)):
+    """Emite el remito (orden de entrega) en PDF.
+
+    Es POST y no GET porque, igual que imprimir_orden, tiene un efecto
+    colateral: numero_remito se asigna la primera vez (reclamo idempotente vía
+    UPDATE condicional, mismo mecanismo que la orden de producción) y
+    reimprimir sólo regenera el PDF con el mismo número. A diferencia de la
+    orden de producción, el remito no descuenta stock.
+    """
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
+
+    if not db_trabajo.remito_impreso:
+        numero_remito = _generar_numero_remito(db)
+
+        reclamado = (
+            db.query(models.Trabajo)
+            .filter(models.Trabajo.id == trabajo_id, models.Trabajo.remito_impreso.isnot(True))
+            .update(
+                {
+                    "remito_impreso": True,
+                    "numero_remito": numero_remito,
+                    "fecha_remito_impreso": datetime.now(timezone.utc),
+                },
+                synchronize_session=False,
+            )
+        )
+
+        if reclamado:
+            db.commit()
+        else:
+            # Perdimos la carrera: el otro request ya lo imprimió.
+            db.rollback()
+        db.refresh(db_trabajo)
+
+    pdf = construir_entrega_pdf(db_trabajo, db_trabajo.cliente)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="remito_{db_trabajo.numero_remito}.pdf"'},
     )

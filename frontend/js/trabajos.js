@@ -243,7 +243,7 @@ async function cargarSelectoresPapel() {
     const papeles = stock.filter(a => a.unidad === 'Pliegos');
     const opciones = '<option value="">Sin papel del stock</option>' +
         papeles.map(a => `<option value="${a.id}">${esc(a.nombre)} (${a.cantidad} ${a.unidad})</option>`).join('');
-    ['ft_papel_id', 'fe_papel_id'].forEach(id => {
+    ['ft_papel_id', 'fe_papel_id', 'fop_papel_id'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) {
             const actual = sel.value;
@@ -303,9 +303,10 @@ async function soltarTarjeta(ev, nuevoEstado) {
         return iniciarDisenoDesdeKanban(id);
     }
 
-    // Pasar a Producción exige la orden impresa. Si falta, la ofrecemos en el acto.
+    // Pasar a Producción arranca pidiendo los datos de la boleta: es el momento
+    // en que se conocen, y sin ellos la orden sale impresa vacía.
     if (nuevoEstado === "En Producción") {
-        return pasarAProduccionDesdeKanban(id);
+        return abrirDatosProduccion(id);
     }
 
     try {
@@ -400,7 +401,119 @@ async function iniciarDisenoDesdeKanban(id) {
     }
 }
 
-// Ofrece imprimir la orden si falta, y recién ahí pasa a Producción.
+// ==========================================
+// DATOS DE PRODUCCIÓN (al pasar a En Producción)
+// ==========================================
+// Los trabajos que nacen de un presupuesto nunca pasan por el alta manual: llegan
+// con el papel heredado del ítem pero sin medidas, tintas ni terminaciones, y la
+// orden salía impresa vacía. Se piden acá, cuando el trabajo baja a máquina y
+// esos datos realmente se conocen. Es el gemelo del alta sin el precio.
+async function abrirDatosProduccion(id) {
+    document.getElementById('fop_trabajo_id').value = id;
+
+    await cargarSelectoresPapel();
+    const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
+    const t = trabajos.find(x => x.id === id);
+    if (!t) { refrescarTablero(); return; }
+
+    // El drawer se abre desde una tarjeta: sin esto no se sabe cuál se está cargando.
+    document.getElementById('fop_titulo').textContent =
+        `${t.descripcion_producto || 'Trabajo'} · #${id.substring(0, 6).toUpperCase()}`;
+
+    // Se precarga lo que ya venga (del presupuesto o de una carga anterior): el
+    // operador completa lo que falta, no vuelve a tipear todo.
+    const set = (campo, valor) => { document.getElementById(campo).value = valor ?? ''; };
+    set('fop_papel_id', t.papel_id);
+    set('fop_cantidad_pliegos', t.cantidad_pliegos);
+    set('fop_papel_tipo', t.papel_tipo);
+    set('fop_medida_terminado', t.medida_terminado);
+    set('fop_medida_pliego', t.medida_pliego);
+    set('fop_corte_pliego', t.corte_pliego);
+    set('fop_tintas', t.tintas);
+    set('fop_troquelado', t.troquelado);
+    set('fop_barniz', t.barniz);
+    set('fop_otros', t.otros);
+
+    // Mismo congelamiento que el drawer de edición: con la orden ya impresa el
+    // papel y los pliegos descontaron stock y el backend rechaza cambiarlos.
+    const bloqueado = !!t.orden_impresa;
+    document.getElementById('fop_papel_id').disabled = bloqueado;
+    document.getElementById('fop_cantidad_pliegos').disabled = bloqueado;
+    document.getElementById('fop_aviso_impresa').style.display = bloqueado ? 'block' : 'none';
+
+    // Va después del bloqueo, igual que en la edición: si está congelado no toca nada.
+    sincronizarPliegosConPapel('fop_papel_id', 'fop_cantidad_pliegos');
+
+    toggleDrawer('drawer-datos-produccion');
+}
+
+// Guarda los datos de la boleta y sigue con la emisión de la orden. El PUT va
+// SIN estado a propósito: el backend exige la orden impresa para pasar a
+// Producción, así que el cambio de columna es el último paso de la cadena.
+async function guardarDatosProduccion(e) {
+    e.preventDefault();
+    const restore = disableButtonOnSubmit(e);
+    const id = document.getElementById('fop_trabajo_id').value;
+
+    const opt = (campo) => {
+        const el = document.getElementById(campo);
+        const v = el ? el.value.trim() : "";
+        return v === "" ? null : v;
+    };
+
+    let guardado = false;
+    try {
+        const data = {
+            papel_tipo: opt('fop_papel_tipo'),
+            medida_terminado: opt('fop_medida_terminado'),
+            medida_pliego: opt('fop_medida_pliego'),
+            corte_pliego: opt('fop_corte_pliego'),
+            tintas: opt('fop_tintas'),
+            troquelado: opt('fop_troquelado'),
+            barniz: opt('fop_barniz'),
+            otros: opt('fop_otros')
+        };
+        // Papel y pliegos sólo se mandan si no están congelados por la orden impresa.
+        if (!document.getElementById('fop_papel_id').disabled) {
+            data.papel_id = opt('fop_papel_id');
+            data.cantidad_pliegos = opt('fop_cantidad_pliegos');
+        }
+
+        const resp = await fetch(`${API_URL}/trabajos/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudieron guardar los datos de producción."));
+        }
+
+        guardado = true;
+    } catch (error) {
+        // El drawer queda abierto para corregir y la tarjeta no se movió.
+        Swal.fire('No se pudo guardar', error.message, 'error');
+    } finally {
+        restore();
+    }
+
+    // Fuera del try: un problema en la emisión de la orden es otro error, con su
+    // propio mensaje, y no debe reportarse como si no se hubieran guardado los datos.
+    if (guardado) {
+        toggleDrawer('drawer-datos-produccion');
+        await pasarAProduccionDesdeKanban(id);
+    }
+}
+
+// Abandonar la carga deja el trabajo donde estaba: el tablero se re-renderiza
+// desde el backend y la tarjeta vuelve a su columna real.
+function cancelarDatosProduccion() {
+    toggleDrawer('drawer-datos-produccion');
+    refrescarTablero();
+}
+
+// Segundo tramo del pase a Producción: ofrece imprimir la orden si falta (la
+// emisión descuenta el papel y numera la boleta) y recién ahí cambia el estado.
 async function pasarAProduccionDesdeKanban(id) {
     const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
     const t = trabajos.find(x => x.id === id);
@@ -483,6 +596,34 @@ async function descargarOrden(id, forzar = false) {
         return false;
     }
 }
+// Descarga el remito (orden de entrega) del trabajo. Mismo patrón que
+// descargarOrden: la numeración es idempotente en el backend, reimprimir no
+// genera un número nuevo ni repite ningún efecto (a diferencia de la orden,
+// el remito no toca stock).
+async function descargarRemito(id) {
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}/orden-entrega`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo generar el remito."));
+        }
+
+        const blob = await resp.blob();
+        const enlace = document.createElement('a');
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = `remito_${id.substring(0,6).toUpperCase()}.pdf`;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        URL.revokeObjectURL(enlace.href);
+
+        refrescarTablero();
+        return true;
+    } catch (error) {
+        Swal.fire('No se pudo imprimir el remito', error.message, 'error');
+        return false;
+    }
+}
 async function cargarTrabajos() {
     const [trabajos, clientes, presupuestos] = await Promise.all([
         (await fetch(`${API_URL}/trabajos/`)).json(),
@@ -539,6 +680,9 @@ async function cargarTrabajos() {
             ? `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>`
             : `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarOrden('${t.id}')">
                 ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
+              </button>
+              <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarRemito('${t.id}')">
+                ${t.remito_impreso ? '🖨️ Reimprimir Remito' : '🖨️ Imprimir Remito'}
               </button>
               <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>`;
 

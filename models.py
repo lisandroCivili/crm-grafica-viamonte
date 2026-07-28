@@ -90,6 +90,13 @@ class Trabajo(Base):
     # reingreso pase una sola vez aunque se cancele y reactive varias veces.
     papel_devuelto = Column(Boolean, default=False)
 
+    # --- Emisión del remito (orden de entrega) ---
+    # Mismo criterio que orden_impresa/numero_orden: el número se asigna recién
+    # al imprimir, y reimprimir sólo regenera el PDF sin pisar el número.
+    remito_impreso = Column(Boolean, default=False)
+    numero_remito = Column(String, index=True, nullable=True)
+    fecha_remito_impreso = Column(DateTime, nullable=True)
+
     cliente = relationship("Cliente", back_populates="trabajos")
     notas = relationship("Nota", back_populates="trabajo")
     papel = relationship("ArticuloStock")
