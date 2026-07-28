@@ -5,6 +5,7 @@ import models, schemas
 from database import get_db
 from datetime import date, datetime, timezone
 from money import Q2, Q3
+from auditoria import asentar, cambios
 from calculos import calcular_saldo_trabajo
 from papel import buscar_papel, validar_papel
 from pdf import construir_orden_pdf, construir_entrega_pdf
@@ -29,6 +30,22 @@ router = APIRouter(
 
 # Los dos campos que no ve el taller. Juntos dan el margen de cada trabajo.
 CAMPOS_DE_PLATA = ("precio_venta", "costo_total_materiales")
+
+# Cómo se llama esta entidad en el registro de auditoría. Constante para que el
+# filtro de la pantalla y lo que se guarda no se puedan despegar por un typo.
+ENTIDAD = "Trabajo"
+
+
+def _resumen(trabajo: models.Trabajo) -> str:
+    """Cómo se nombra este trabajo en el registro de auditoría.
+
+    Por el número de orden cuando ya se imprimió, que es como lo llaman en el
+    taller; hasta entonces, por lo que es. El cliente va siempre: en una lista de
+    cambios "Volantes A5" sin apellido no alcanza para saber cuál era.
+    """
+    quien = trabajo.cliente.nombre_completo if trabajo.cliente else "sin cliente"
+    que = trabajo.numero_orden or f"{trabajo.cantidad}x {trabajo.descripcion_producto}"
+    return f"{que} ({quien})"
 
 
 def _trabajo_visible(trabajo: models.Trabajo, usuario: models.Usuario) -> schemas.TrabajoResponse:
@@ -360,13 +377,19 @@ def _aplicar_saldo_favor(db: Session, db_trabajo: models.Trabajo) -> tuple[Decim
 # Dar de alta un trabajo exige ponerle precio, así que es del dueño. El taller
 # trabaja sobre trabajos ya creados (o nacidos de un presupuesto convertido).
 @router.post("/", response_model=schemas.TrabajoResponse, dependencies=[Depends(solo_admin)])
-def crear_trabajo(trabajo: schemas.TrabajoCreate, db: Session = Depends(get_db)):
+def crear_trabajo(
+    trabajo: schemas.TrabajoCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     obtener_o_404(db, models.Cliente, trabajo.cliente_id, "El cliente indicado no existe.")
 
     validar_papel(db, trabajo.papel_id, trabajo.cantidad_pliegos)
 
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
+    db.flush()  # necesitamos el id para el asiento de auditoría
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_trabajo.id, _resumen(nuevo_trabajo))
     db.commit()
     db.refresh(nuevo_trabajo)
     return nuevo_trabajo
@@ -468,12 +491,25 @@ def actualizar_trabajo(
         if db_item:
             db_item.presupuesto.estado = trabajo_update.estado
 
+    # Va acá, después de TODOS los setattr y antes del commit: cambios() lee el
+    # historial de atributos, que un flush limpiaría. Si el PUT no cambió nada
+    # (el formulario manda el trabajo entero aunque no se haya tocado un campo)
+    # devuelve None y no se ensucia el log.
+    detalle = cambios(db_trabajo)
+    if detalle:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
+                _resumen(db_trabajo), detalle)
+
     db.commit()
     db.refresh(db_trabajo)
     return _trabajo_visible(db_trabajo, usuario)
 
 @router.delete("/{trabajo_id}", dependencies=[Depends(solo_admin)])
-def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
+def eliminar_trabajo(
+    trabajo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
     tiene_movimientos = db.query(models.Movimiento).filter(models.Movimiento.trabajo_id == trabajo_id).first()
@@ -495,6 +531,10 @@ def eliminar_trabajo(trabajo_id: str, db: Session = Depends(get_db)):
     tiene_cheques = db.query(models.Cheque).filter(models.Cheque.trabajo_id == trabajo_id).first()
     if tiene_cheques:
         raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene cheques imputados. Cancelalo en su lugar.")
+
+    # El resumen se arma ANTES del delete, con el objeto todavía cargado: es el
+    # único rastro que va a quedar de este trabajo.
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_trabajo.id, _resumen(db_trabajo))
 
     db.query(models.Nota).filter(models.Nota.trabajo_id == trabajo_id).update({"trabajo_id": None})
     db.delete(db_trabajo)
@@ -571,6 +611,17 @@ def iniciar_diseno(
     if db_item:
         db_item.presupuesto.estado = "En Diseño"
 
+    # Qué se cobró al iniciar. No vive en el Trabajo (va como Movimiento, Cheque
+    # o Nota), así que cambios() no lo ve y hay que agregarlo a mano: es
+    # justamente el dato que distingue esta acción de un cambio de estado común.
+    if datos.monto > Decimal("0"):
+        cobrado = f"seña de $ {Q2(datos.monto)} ({datos.metodo or 'sin método'})"
+    else:
+        cobrado = f"sin seña: {datos.motivo.strip()}"
+    detalle = "; ".join(parte for parte in (cambios(db_trabajo), cobrado) if parte)
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
+            _resumen(db_trabajo), detalle)
+
     db.commit()
     db.refresh(db_trabajo)
     return _trabajo_visible(db_trabajo, usuario)
@@ -578,7 +629,11 @@ def iniciar_diseno(
 
 @router.post("/{trabajo_id}/aplicar-saldo-favor", response_model=schemas.AplicarSaldoFavorResponse,
              dependencies=[Depends(solo_admin)])
-def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
+def aplicar_saldo_favor(
+    trabajo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Cubre el saldo pendiente de un trabajo con el saldo a favor del cliente.
 
     No crea un pago nuevo (eso duplicaría la plata): re-imputa a este trabajo los
@@ -596,6 +651,14 @@ def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
         )
 
     monto_aplicado, saldo_pendiente_restante = _aplicar_saldo_favor(db, db_trabajo)
+
+    # Lo que cambió acá no es el trabajo sino a qué trabajo está imputada plata
+    # que ya existía: cambios(db_trabajo) no ve nada, y sin este asiento la
+    # re-imputación sería el movimiento de plata más silencioso del sistema.
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id, _resumen(db_trabajo),
+            f"aplicó $ {monto_aplicado} de saldo a favor del cliente; "
+            f"queda pendiente $ {saldo_pendiente_restante}")
+
     db.commit()
     return schemas.AplicarSaldoFavorResponse(
         monto_aplicado=monto_aplicado,
@@ -604,7 +667,12 @@ def aplicar_saldo_favor(trabajo_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{trabajo_id}/imprimir-orden")
-def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(get_db)):
+def imprimir_orden(
+    trabajo_id: str,
+    forzar: bool = False,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Emite la orden de producción en PDF y descuenta el papel del stock.
 
     El descuento pasa exactamente acá, la primera vez. orden_impresa es el guard
@@ -612,6 +680,10 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
 
     forzar=true permite emitir la orden aunque no alcance el papel (se compra en
     el momento), dejando constancia en el historial de stock.
+
+    En auditoría queda sólo la PRIMERA emisión, que es la que asigna número y
+    descuenta papel: una reimpresión no cambia nada en la base y la regla del log
+    es una fila por cambio, no por pedido.
     """
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
@@ -643,6 +715,15 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
             # Si el papel no alcanza, _descontar_papel corta con un 400 y el
             # reclamo se va con la transacción: la orden queda sin imprimir.
             _descontar_papel(db, db_trabajo, numero_orden, forzar)
+
+            # El número y el descuento se escribieron con un UPDATE por query y
+            # no con setattr, así que cambios() no los ve: el detalle va a mano.
+            detalle = f"orden {numero_orden} emitida"
+            if forzar:
+                detalle += " (forzada: el papel no alcanzaba)"
+            asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id,
+                    _resumen(db_trabajo), detalle)
+
             db.commit()
         else:
             # Perdimos la carrera: el otro request ya la imprimió y descontó.
@@ -658,7 +739,11 @@ def imprimir_orden(trabajo_id: str, forzar: bool = False, db: Session = Depends(
 
 
 @router.post("/{trabajo_id}/orden-entrega")
-def orden_entrega(trabajo_id: str, db: Session = Depends(get_db)):
+def orden_entrega(
+    trabajo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Emite el remito (orden de entrega) en PDF.
 
     Es POST y no GET porque, igual que imprimir_orden, tiene un efecto
@@ -686,6 +771,10 @@ def orden_entrega(trabajo_id: str, db: Session = Depends(get_db)):
         )
 
         if reclamado:
+            # Mismo caso que imprimir_orden: el UPDATE fue por query, cambios()
+            # no lo ve. Sólo la primera emisión, que es la que asigna el número.
+            asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id,
+                    _resumen(db_trabajo), f"remito {numero_remito} emitido")
             db.commit()
         else:
             # Perdimos la carrera: el otro request ya lo imprimió.

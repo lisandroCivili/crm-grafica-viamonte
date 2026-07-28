@@ -35,6 +35,7 @@ LECTURAS = [
     ("/api/asistencia/planilla", [ADMIN, ENCARGADO]),
     ("/api/empleados/",          [ADMIN, ENCARGADO]),
     ("/api/backup",              [ADMIN]),
+    ("/api/auditoria/",          [ADMIN]),
 ]
 
 

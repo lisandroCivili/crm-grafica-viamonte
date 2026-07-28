@@ -18,6 +18,14 @@ ESTADOS_CHEQUE = ["En Cartera", "Depositado", "Cobrado", "Endosado", "Rechazado"
 # Estado con el que nace un cheque. Los demás se alcanzan por transición.
 ESTADO_CHEQUE_INICIAL = "En Cartera"
 
+# Qué hizo el usuario, para la tabla de auditoría. Verbos en pasado porque cada
+# fila se lee como una frase: "marcos editó Trabajo OP-000012".
+ACCION_ALTA = "creó"
+ACCION_EDICION = "editó"
+ACCION_BAJA = "eliminó"
+ACCION_INGRESO = "ingresó"
+ACCION_INGRESO_FALLIDO = "intento fallido"
+
 
 def ahora_local():
     """Hora local del taller para los registros que se agrupan por día.
@@ -348,3 +356,52 @@ class Usuario(Base):
 
     empleado_id = Column(String, ForeignKey("empleados.id"), nullable=True)
     empleado = relationship("Empleado")
+
+class Auditoria(Base):
+    """Quién cambió qué y cuándo. Una fila por cada cosa que se tocó en la base.
+
+    Existe porque el sistema pasó de un .exe que usaba una sola persona a tres
+    personas entrando desde tres computadoras: si un trabajo aparece cancelado o
+    un gasto con otro monto, tiene que poder saberse quién lo hizo sin preguntar.
+
+    Es SÓLO LECTURA desde la API (routers/auditoria.py no tiene POST, PUT ni
+    DELETE): un registro que se puede editar no registra nada.
+
+    No reemplaza a HistorialStock ni a HistorialCheque, que son historiales de
+    dominio (uno alimenta el costo del papel, el otro la máquina de estados del
+    cheque). Éste es transversal y responde otra pregunta.
+
+    Tres decisiones que no se leen solas:
+
+    - entidad_id NO es ForeignKey. Apunta a tablas distintas y, sobre todo, a
+      filas que ya no existen: el asiento de un borrado es el más valioso del
+      log. Con el PRAGMA de foreign_keys activo (database.py) una FK haría
+      fallar el DELETE o se llevaría puesto el rastro.
+    - usuario_nombre duplica el nombre a propósito. Es el hecho histórico ("lo
+      hizo marcos"), no un puntero; mismo criterio que papel_tipo vs papel_id en
+      Trabajo. Además deja el log legible sin join, y es lo único que queda
+      cuando el autor es un intento de ingreso fallido (usuario_id en null).
+    - fecha usa ahora_local y no UTC como HistorialStock/HistorialCheque: se
+      filtra por rango de fechas del taller, así que un cambio de las 22:00 tiene
+      que caer en el día de hoy (ver ahora_local() arriba).
+    """
+    __tablename__ = "auditoria"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    fecha = Column(DateTime, default=ahora_local, index=True)
+
+    # En null sólo para el intento de ingreso fallido: ahí no hay usuario que
+    # apuntar, pero el intento igual tiene que quedar asentado.
+    usuario_id = Column(String, ForeignKey("usuarios.id"), nullable=True)
+    usuario_nombre = Column(String, nullable=False)
+
+    accion = Column(String, nullable=False)   # ACCION_ALTA, ACCION_EDICION...
+    entidad = Column(String, nullable=False, index=True)  # "Trabajo", "Cliente"...
+    entidad_id = Column(String, nullable=True, index=True)
+
+    # Cómo se lee la fila en la pantalla: "Trabajo OP-000012 (Juan Pérez)".
+    resumen = Column(String, nullable=False)
+    # Qué cambió exactamente: "estado: Aprobado -> En Diseño". Lo arma
+    # auditoria.cambios(). En null cuando la acción no tiene diff (un alta).
+    detalle = Column(Text, nullable=True)
+
+    usuario = relationship("Usuario")

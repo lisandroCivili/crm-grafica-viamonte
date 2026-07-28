@@ -6,6 +6,7 @@ Este __init__ re-exporta todos los nombres públicos, así que `import schemas` 
 import de afuera tuvo que cambiar. Los Create/Update/Response de cada entidad se
 mantienen separados, como pide la convención del proyecto.
 """
+from .auditoria import AuditoriaResponse
 from .auth import LoginRequest, TokenResponse, UsuarioResponse
 from .clientes import ClienteBase, ClienteCreate, ClienteResponse, ClienteUpdate
 from .trabajos import (
