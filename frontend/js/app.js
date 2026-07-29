@@ -18,6 +18,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const resp = await fetch(`${API_URL}/auth/me`);
         if (!resp.ok) return; // el interceptor de core.js ya limpio el token
         usuarioActual = await resp.json();
+        renderUsuarioActual();
     } catch (e) {
         console.error("No se pudo verificar la sesion", e);
         return;
@@ -87,6 +88,7 @@ async function hacerLogin(e) {
             const data = await resp.json();
             localStorage.setItem(TOKEN_KEY, data.access_token);
             usuarioActual = data.usuario;
+            renderUsuarioActual();
             entrarAlSistema();
         } else {
             Swal.fire('Error', 'Usuario o contraseña incorrectos', 'error');
@@ -101,6 +103,7 @@ async function hacerLogin(e) {
 function cerrarSesion() {
     localStorage.removeItem(TOKEN_KEY);
     usuarioActual = null;
+    renderUsuarioActual();
     // Recargar la página es la forma más limpia de resetear todo y volver a mostrar el login
     location.reload();
 }

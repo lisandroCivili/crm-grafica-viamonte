@@ -24,6 +24,21 @@ let usuarioActual = null;
 // con un apóstrofo en la descripción.
 const trabajosPorId = new Map();
 
+function renderUsuarioActual() {
+    const badge = document.getElementById('usuario-logueado');
+    if (!badge) return;
+
+    const nombre = usuarioActual?.nombre?.trim();
+    const rol = usuarioActual?.rol?.trim();
+
+    if (nombre) {
+        badge.textContent = `Usuario: ${nombre}`;
+        return;
+    }
+
+    badge.textContent = 'Usuario: -';
+}
+
 // ==========================================
 // HELPER: FORMATO DE DINERO (siempre 2 decimales)
 // ==========================================

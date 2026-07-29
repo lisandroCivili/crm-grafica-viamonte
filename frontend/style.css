@@ -23,8 +23,9 @@ h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 700; margin-
 
 /* SIDEBAR */
 #sidebar { width: var(--sidebar-w); background: var(--ink); color: #fff; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
-.brand { padding: 24px 20px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.brand { padding: 24px 20px; border-bottom: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 8px; }
 .brand-name { font-family: 'Space Grotesk'; font-size: 18px; color: var(--magenta); }
+.usuario-logueado { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.08); color: rgba(255,255,255,.82); font-size: 12px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Flex column: es lo que hace funcionar el 'margin-top:auto' del bloque de
    Respaldo/Cerrar Sesión, que empuja ese grupo al pie del sidebar.
    min-height:0 + overflow-y son necesarios juntos: un flex item no se encoge
