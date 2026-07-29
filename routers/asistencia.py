@@ -3,9 +3,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
+from auditoria import asentar
 from calculos import CERO, horas_trabajadas
 from database import get_db
-from seguridad import ROL_ADMIN, ROL_ENCARGADO, requiere_rol
+from seguridad import ROL_ADMIN, ROL_ENCARGADO, requiere_rol, usuario_actual
 
 # El encargado es quien carga la planilla del taller todos los días.
 router = APIRouter(
@@ -13,6 +14,9 @@ router = APIRouter(
     tags=["Asistencia"],
     dependencies=[Depends(requiere_rol(ROL_ADMIN, ROL_ENCARGADO))],
 )
+
+# Cómo se llama esta entidad en el registro de auditoría.
+ENTIDAD = "Asistencia"
 
 
 def _fila_vacia(fila: schemas.FilaPlanillaGuardar) -> bool:
@@ -91,8 +95,24 @@ def ver_planilla(fecha: date = None, db: Session = Depends(get_db)):
     """La planilla de un día. Sin fecha, la de hoy."""
     return _armar_planilla(db, fecha or date.today())
 
+def _como_quedo(fila: schemas.FilaPlanillaGuardar, nombre: str) -> str:
+    """Cómo quedó anotado un empleado, para el detalle de la auditoría."""
+    if _fila_vacia(fila):
+        return f"{nombre}: sin nada anotado"
+
+    horario = f"{fila.hora_entrada or '?'} a {fila.hora_salida or '?'}"
+    observaciones = (fila.observaciones or "").strip()
+    if fila.hora_entrada is None and fila.hora_salida is None:
+        return f"{nombre}: {observaciones}"
+    return f"{nombre}: {horario}" + (f" ({observaciones})" if observaciones else "")
+
+
 @router.post("/planilla", response_model=schemas.PlanillaDiaResponse)
-def guardar_planilla(planilla: schemas.PlanillaGuardarRequest, db: Session = Depends(get_db)):
+def guardar_planilla(
+    planilla: schemas.PlanillaGuardarRequest,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Guarda el día entero de una sola vez.
 
     Por cada fila hace upsert contra (empleado, fecha): si ya había registro lo
@@ -133,6 +153,21 @@ def guardar_planilla(planilla: schemas.PlanillaGuardarRequest, db: Session = Dep
         registro.hora_entrada = fila.hora_entrada
         registro.hora_salida = fila.hora_salida
         registro.observaciones = (fila.observaciones or "").strip() or None
+
+    # Un asiento por planilla guardada y no uno por fila: el encargado guarda el
+    # día entero de una sola vez (y varias veces por día, a medida que la gente
+    # entra y sale). Una fila por empleado convertiría el log en una lista
+    # ilegible de la que no se saca nada.
+    nombre_de = {
+        e.id: e.nombre
+        for e in db.query(models.Empleado).filter(models.Empleado.id.in_(ids)).all()
+    }
+    detalle = "; ".join(
+        _como_quedo(fila, nombre_de.get(fila.empleado_id, "empleado desconocido"))
+        for fila in planilla.filas
+    )
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, None,
+            f"planilla del {planilla.fecha.strftime('%d/%m/%Y')}", detalle or None)
 
     db.commit()
     return _armar_planilla(db, planilla.fecha)

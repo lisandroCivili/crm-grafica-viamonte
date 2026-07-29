@@ -2,10 +2,11 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
+from auditoria import asentar, cambios
 from database import get_db
 from calculos import calcular_saldo_cliente, metodo_es_cheque
 from routers._comun import obtener_o_404
-from seguridad import solo_admin
+from seguridad import solo_admin, usuario_actual
 
 # Módulo entero del dueño: es la cuenta corriente de los clientes (qué se
 # cobró, qué se debe). Es lo que hace que la ficha del cliente no muestre saldo
@@ -21,12 +22,28 @@ router = APIRouter(
 # existe la fila en Cheques el saldo se descuenta dos veces.
 ERROR_PAGO_CHEQUE = "Los cheques se registran desde el módulo Cheques."
 
+# Cómo se llama esta entidad en el registro de auditoría.
+ENTIDAD = "Movimiento"
+
+
+def _resumen(mov: models.Movimiento) -> str:
+    """Cómo se nombra este movimiento en el registro de auditoría.
+
+    Lleva el monto y el tipo porque es plata: en un borrado, este texto es lo
+    único que va a explicar por qué el saldo del cliente cambió.
+    """
+    return f"{mov.tipo} de $ {mov.monto} — {mov.descripcion}"
+
 @router.get("/", response_model=list[schemas.MovimientoResponse])
 def listar_todos_movimientos(db: Session = Depends(get_db)):
     return db.query(models.Movimiento).all()
 
 @router.post("/", response_model=schemas.MovimientoResponse)
-def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db)):
+def crear_movimiento(
+    mov: schemas.MovimientoCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     # Un pago siempre tiene que ser un monto positivo.
     if mov.tipo == "Pago" and mov.monto <= Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto del pago debe ser mayor a 0.")
@@ -42,6 +59,8 @@ def crear_movimiento(mov: schemas.MovimientoCreate, db: Session = Depends(get_db
 
     nuevo = models.Movimiento(**mov.model_dump())
     db.add(nuevo)
+    db.flush()  # necesitamos el id para el asiento de auditoría
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo.id, _resumen(nuevo))
     db.commit()
     db.refresh(nuevo)
     return nuevo
@@ -66,7 +85,12 @@ def listar_movimientos(cliente_id: str, db: Session = Depends(get_db)):
     return db.query(models.Movimiento).filter(models.Movimiento.cliente_id == cliente_id).all()
 
 @router.put("/{movimiento_id}", response_model=schemas.MovimientoResponse)
-def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpdate, db: Session = Depends(get_db)):
+def actualizar_movimiento(
+    movimiento_id: str,
+    mov_update: schemas.MovimientoUpdate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_mov = obtener_o_404(db, models.Movimiento, movimiento_id, "Movimiento no encontrado")
 
     update_data = mov_update.model_dump(exclude_unset=True)
@@ -85,13 +109,26 @@ def actualizar_movimiento(movimiento_id: str, mov_update: schemas.MovimientoUpda
     for key, value in update_data.items():
         setattr(db_mov, key, value)
 
+    detalle = cambios(db_mov)
+    if detalle:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_mov.id,
+                _resumen(db_mov), detalle)
+
     db.commit()
     db.refresh(db_mov)
     return db_mov
 
 @router.delete("/{movimiento_id}")
-def eliminar_movimiento(movimiento_id: str, db: Session = Depends(get_db)):
+def eliminar_movimiento(
+    movimiento_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_mov = obtener_o_404(db, models.Movimiento, movimiento_id, "Movimiento no encontrado")
+
+    # Borrar un pago cambia el saldo del cliente y los ingresos del período: el
+    # asiento es lo único que queda para saber que ese pago existió.
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_mov.id, _resumen(db_mov))
 
     db.delete(db_mov)
     db.commit()

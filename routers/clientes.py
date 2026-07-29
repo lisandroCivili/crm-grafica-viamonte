@@ -3,10 +3,11 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import models, schemas
+from auditoria import asentar, cambios
 from database import get_db
 from calculos import calcular_saldo_cliente
 from routers._comun import obtener_o_404
-from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin
+from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin, usuario_actual
 import uuid
 
 # Instanciamos el router específico para Clientes.
@@ -19,18 +20,34 @@ router = APIRouter(
     dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
 )
 
+# Cómo se llama esta entidad en el registro de auditoría.
+ENTIDAD = "Cliente"
+
+
+def _resumen(cliente: models.Cliente) -> str:
+    """Cómo se nombra este cliente en el registro de auditoría."""
+    if cliente.nombre_empresa:
+        return f"{cliente.nombre_completo} ({cliente.nombre_empresa})"
+    return cliente.nombre_completo
+
 @router.post("/", response_model=schemas.ClienteResponse)
-def crear_cliente(cliente: schemas.ClienteCreate, db: Session = Depends(get_db)):
+def crear_cliente(
+    cliente: schemas.ClienteCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     # Verificamos que no exista ya un cliente con ese mismo CUIT/DNI
     db_cliente = db.query(models.Cliente).filter(models.Cliente.dni_cuit == cliente.dni_cuit).first()
     if db_cliente:
         raise HTTPException(status_code=400, detail="Este DNI/CUIT ya está registrado.")
-    
+
     nuevo_cliente = models.Cliente(
         **cliente.model_dump()
     )
-    
+
     db.add(nuevo_cliente)
+    db.flush()  # necesitamos el id para el asiento de auditoría
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_cliente.id, _resumen(nuevo_cliente))
     db.commit()
     db.refresh(nuevo_cliente)
     return nuevo_cliente
@@ -96,7 +113,12 @@ def saldos_clientes(db: Session = Depends(get_db)):
     return saldos
 
 @router.put("/{cliente_id}", response_model=schemas.ClienteResponse)
-def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, db: Session = Depends(get_db)):
+def actualizar_cliente(
+    cliente_id: str,
+    cliente_update: schemas.ClienteUpdate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_cliente = obtener_o_404(db, models.Cliente, cliente_id, "Cliente no encontrado")
 
     update_data = cliente_update.model_dump(exclude_unset=True)
@@ -114,12 +136,21 @@ def actualizar_cliente(cliente_id: str, cliente_update: schemas.ClienteUpdate, d
     for key, value in update_data.items():
         setattr(db_cliente, key, value)
 
+    detalle = cambios(db_cliente)
+    if detalle:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_cliente.id,
+                _resumen(db_cliente), detalle)
+
     db.commit()
     db.refresh(db_cliente)
     return db_cliente
 
 @router.delete("/{cliente_id}", dependencies=[Depends(solo_admin)])
-def eliminar_cliente(cliente_id: str, db: Session = Depends(get_db)):
+def eliminar_cliente(
+    cliente_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_cliente = obtener_o_404(db, models.Cliente, cliente_id, "Cliente no encontrado")
 
     tiene_trabajos = db.query(models.Trabajo).filter(models.Trabajo.cliente_id == cliente_id).first()
@@ -141,6 +172,10 @@ def eliminar_cliente(cliente_id: str, db: Session = Depends(get_db)):
     tiene_cheques = db.query(models.Cheque).filter(models.Cheque.cliente_id == cliente_id).first()
     if tiene_cheques:
         raise HTTPException(status_code=400, detail="No se puede eliminar: el cliente tiene cheques asociados.")
+
+    # Antes del delete, con el objeto todavía cargado: es el único rastro que va
+    # a quedar de este cliente.
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_cliente.id, _resumen(db_cliente))
 
     db.delete(db_cliente)
     db.commit()

@@ -4,14 +4,23 @@ Lo que se prueba acá es que el log diga la verdad: que el autor sea quien mand�
 el pedido y no el admin de turno, que un pedido que falla no deje rastro de algo
 que no pasó, y que un borrado deje constancia aunque la entidad ya no exista.
 
-Los endpoints instrumentados son los de trabajos.py y el login (Etapa A). El
-resto de los routers se suma en la Etapa B con este mismo patrón.
+Están instrumentados los 35 endpoints que modifican la base, de los doce
+routers, más el login.
 """
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 import models
-from conftest import cabecera_de, crear_cliente, crear_papel, crear_trabajo, crear_usuario
+from conftest import (
+    cabecera_de,
+    crear_cheque,
+    crear_cliente,
+    crear_empleado,
+    crear_papel,
+    crear_presupuesto,
+    crear_trabajo,
+    crear_usuario,
+)
 
 
 def asientos(db, entidad=None):
@@ -295,6 +304,206 @@ class TestConsulta:
 
     def test_no_deja_pedir_mas_del_techo(self, client, db):
         assert client.get("/api/auditoria/?limite=99999").status_code == 422
+
+
+# --- Los demás módulos ------------------------------------------------------
+
+class TestClientes:
+
+    def test_alta_edicion_y_baja(self, client, db):
+        r = client.post("/api/clientes/", json={
+            "nombre_completo": "Ana Gómez", "dni_cuit": "20111111112", "telefono": "1122334455",
+        })
+        cliente_id = r.json()["id"]
+        client.put(f"/api/clientes/{cliente_id}", json={"telefono": "1199887766"})
+        client.delete(f"/api/clientes/{cliente_id}")
+
+        acciones = [f.accion for f in asientos(db, "Cliente")]
+        assert acciones == [models.ACCION_ALTA, models.ACCION_EDICION, models.ACCION_BAJA]
+        assert "1122334455 -> 1199887766" in asientos(db, "Cliente")[1].detalle
+        assert "Ana Gómez" in asientos(db, "Cliente")[2].resumen
+
+
+class TestGastos:
+
+    def test_el_monto_queda_en_el_resumen(self, client, db):
+        """Un gasto borrado cambia la ganancia del mes: el monto tiene que estar
+        en el asiento o no hay forma de explicar la diferencia."""
+        r = client.post("/api/gastos/", json={
+            "categoria": "Insumos", "concepto": "Tinta negra",
+            "monto": 45000, "fecha": str(date.today()),
+        })
+        client.delete(f"/api/gastos/{r.json()['id']}")
+
+        baja = ultimo(db, "Gasto")
+        assert baja.accion == models.ACCION_BAJA
+        assert "Tinta negra" in baja.resumen
+        assert "45000" in baja.resumen
+
+
+class TestNotas:
+
+    def test_alta_edicion_y_baja(self, client, db):
+        cliente = crear_cliente(db)
+        r = client.post("/api/notas/", json={"cliente_id": cliente.id, "texto": "Llamar antes"})
+        nota_id = r.json()["id"]
+        client.put(f"/api/notas/{nota_id}", json={"texto": "Llamar después de las 18"})
+        client.delete(f"/api/notas/{nota_id}")
+
+        filas = asientos(db, "Nota")
+        assert [f.accion for f in filas] == [
+            models.ACCION_ALTA, models.ACCION_EDICION, models.ACCION_BAJA
+        ]
+        assert "Llamar antes -> Llamar después de las 18" in filas[1].detalle
+
+
+class TestEmpleados:
+
+    def test_dar_de_baja_queda_como_edicion(self, client, db):
+        """Un empleado no se borra: se le pone activo=False. Sin asiento, dejaría
+        de aparecer en la planilla sin que nadie sepa quién lo sacó."""
+        empleado = crear_empleado(db, nombre="Eduardo")
+
+        client.put(f"/api/empleados/{empleado.id}", json={"activo": False})
+
+        fila = ultimo(db, "Empleado")
+        assert fila.accion == models.ACCION_EDICION
+        assert fila.resumen == "Eduardo"
+        assert "activo: True -> False" in fila.detalle
+
+
+class TestMovimientos:
+
+    def test_borrar_un_pago_deja_el_monto_asentado(self, client, db):
+        cliente = crear_cliente(db)
+        r = client.post("/api/movimientos/", json={
+            "cliente_id": cliente.id, "monto": 25000,
+            "tipo": "Pago", "metodo": "Efectivo", "descripcion": "Seña",
+        })
+        client.delete(f"/api/movimientos/{r.json()['id']}")
+
+        baja = ultimo(db, "Movimiento")
+        assert baja.accion == models.ACCION_BAJA
+        assert "25000" in baja.resumen
+
+
+class TestStock:
+
+    def test_un_ajuste_de_cantidad_dice_quien_lo_hizo(self, client, db):
+        """Es lo que HistorialStock no puede contestar: registra el movimiento y
+        el motivo, pero no la persona."""
+        papel = crear_papel(db, cantidad=Decimal("500"))
+        marcos = crear_usuario(db, nombre="marcos", rol="encargado")
+
+        client.patch(f"/api/stock/{papel.id}",
+                     json={"cantidad": 320, "motivo": "Recuento"},
+                     headers=cabecera_de(marcos))
+
+        fila = ultimo(db, "Stock")
+        assert fila.usuario_nombre == "marcos"
+        # El valor nuevo se lee de la sesión, antes de que el tipo Cantidad le
+        # ponga los tres decimales al guardar: en el log queda '320' y no
+        # '320.000'. Es cosmético y no vale ensuciar el router por eso.
+        assert "cantidad: 500.000 -> 320" in fila.detalle
+        # El historial de dominio sigue funcionando igual que antes: el asiento
+        # de auditoría se suma, no lo reemplaza.
+        assert db.query(models.HistorialStock).count() == 1
+
+    def test_editar_sin_cambiar_nada_no_asienta(self, client, db):
+        """El PATCH pisa ultima_actualizacion en cada llamada: si contara como
+        cambio, abrir y guardar dejaría una fila que no dice nada."""
+        papel = crear_papel(db)
+
+        client.patch(f"/api/stock/{papel.id}", json={})
+
+        assert asientos(db, "Stock") == []
+
+    def test_una_compra_de_varios_items_deja_una_fila_por_item(self, client, db):
+        r = client.post("/api/stock/compras", json=[
+            {"nombre": "Obra 90g", "unidad": "Pliegos", "cantidad": 100, "costo_total": 10000},
+            {"nombre": "Ilustración 150g", "unidad": "Pliegos", "cantidad": 200, "costo_total": 30000},
+        ])
+        assert r.status_code == 201
+
+        assert len(asientos(db, "Stock")) == 2
+
+
+class TestAsistencia:
+
+    def test_una_fila_por_planilla_y_no_una_por_empleado(self, client, db):
+        """El encargado guarda el día entero varias veces por jornada. Una fila
+        por empleado convertiría el log en una lista de la que no se saca nada."""
+        juan = crear_empleado(db, nombre="Juan")
+        pedro = crear_empleado(db, nombre="Pedro")
+
+        r = client.post("/api/asistencia/planilla", json={
+            "fecha": str(date.today()),
+            "filas": [
+                {"empleado_id": juan.id, "hora_entrada": "08:00:00", "hora_salida": "17:00:00"},
+                {"empleado_id": pedro.id, "observaciones": "franco"},
+            ],
+        })
+        assert r.status_code == 200
+
+        filas = asientos(db, "Asistencia")
+        assert len(filas) == 1
+        assert "Juan: 08:00:00 a 17:00:00" in filas[0].detalle
+        assert "Pedro: franco" in filas[0].detalle
+
+
+class TestPresupuestos:
+
+    def test_convertir_nombra_los_trabajos_que_salieron(self, client, db):
+        presupuesto = crear_presupuesto(db, crear_cliente(db), items=[
+            {"descripcion": "Volantes A5", "cantidad": 1000, "precio_unitario": Decimal("30")},
+            {"descripcion": "Tarjetas", "cantidad": 500, "precio_unitario": Decimal("40")},
+        ])
+
+        r = client.post(f"/api/presupuestos/{presupuesto.id}/convertir")
+        assert r.status_code == 200
+
+        fila = ultimo(db, "Presupuesto")
+        assert "1000x Volantes A5" in fila.detalle
+        assert "500x Tarjetas" in fila.detalle
+
+    def test_reemplazar_los_items_queda_asentado(self, client, db):
+        """Los ítems son una relación, no columnas: sin tratarlos aparte, la
+        edición más típica de un presupuesto no dejaría rastro."""
+        presupuesto = crear_presupuesto(db, crear_cliente(db))
+
+        r = client.put(f"/api/presupuestos/{presupuesto.id}", json={
+            "items": [{"descripcion": "Otra cosa", "cantidad": 200, "precio_unitario": 50}],
+        })
+        assert r.status_code == 200
+
+        assert "ítems reemplazados (1)" in ultimo(db, "Presupuesto").detalle
+
+
+class TestCheques:
+
+    def test_un_cambio_de_estado_dice_quien_y_con_que_motivo(self, client, db):
+        cheque = crear_cheque(db, crear_cliente(db), estado="Cobrado")
+
+        r = client.patch(f"/api/cheques/{cheque.id}",
+                         json={"estado": "Rechazado", "motivo": "lo devolvió el banco"})
+        assert r.status_code == 200
+
+        fila = ultimo(db, "Cheque")
+        assert "Estado Cobrado -> Rechazado" in fila.detalle
+        assert "lo devolvió el banco" in fila.detalle
+        assert "Galicia" in fila.resumen
+
+    def test_borrar_un_cheque_deja_rastro_aunque_su_historial_se_vaya(self, client, db):
+        """El HistorialCheque se borra con el cheque (sin padre queda huérfano).
+        El asiento de auditoría es lo único que sobrevive."""
+        cheque = crear_cheque(db, crear_cliente(db))
+
+        assert client.delete(f"/api/cheques/{cheque.id}").status_code == 200
+        assert db.query(models.HistorialCheque).count() == 0
+
+        baja = ultimo(db, "Cheque")
+        assert baja.accion == models.ACCION_BAJA
+        assert baja.entidad_id == cheque.id
 
 
 # --- El log no se toca ------------------------------------------------------

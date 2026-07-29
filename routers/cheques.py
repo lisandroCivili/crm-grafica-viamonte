@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models, schemas
+from auditoria import asentar
 from database import get_db
 from routers._comun import obtener_o_404
-from seguridad import solo_admin
+from seguridad import solo_admin, usuario_actual
 
 # Módulo entero del dueño: cartera de cheques, bancos y montos.
 router = APIRouter(
@@ -11,6 +12,18 @@ router = APIRouter(
     tags=["Cheques"],
     dependencies=[Depends(solo_admin)],
 )
+
+# Cómo se llama esta entidad en el registro de auditoría.
+#
+# Convive con HistorialCheque, que no se toca: aquél es el historial del
+# documento (alimenta la máquina de estados y se borra con el cheque), éste dice
+# QUIÉN lo movió y sobrevive al borrado del cheque.
+ENTIDAD = "Cheque"
+
+
+def _resumen(cheque: models.Cheque) -> str:
+    """Cómo se nombra este cheque en el registro de auditoría."""
+    return f"{cheque.banco} {cheque.numero} — $ {cheque.monto}"
 
 # Estados finales: el cheque ya impactó la caja (o quedó anulado). Salir de ellos
 # deshace un ingreso, así que exige un motivo que queda asentado en el historial.
@@ -69,7 +82,11 @@ def listar_cheques(db: Session = Depends(get_db)):
     return db.query(models.Cheque).order_by(models.Cheque.fecha_cobro.asc()).all()
 
 @router.post("/", response_model=schemas.ChequeResponse)
-def crear_cheque(cheque: schemas.ChequeCreate, db: Session = Depends(get_db)):
+def crear_cheque(
+    cheque: schemas.ChequeCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     nuevo_cheque = models.Cheque(**cheque.model_dump())
     db.add(nuevo_cheque)
     db.flush()  # necesitamos el id para el historial
@@ -78,12 +95,19 @@ def crear_cheque(cheque: schemas.ChequeCreate, db: Session = Depends(get_db)):
         detalle=f"Cheque {nuevo_cheque.clasificacion} creado por $ {nuevo_cheque.monto}",
         estado_nuevo=nuevo_cheque.estado,
     )
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_cheque.id,
+            _resumen(nuevo_cheque), f"{nuevo_cheque.clasificacion}, {nuevo_cheque.estado}")
     db.commit()
     db.refresh(nuevo_cheque)
     return nuevo_cheque
 
 @router.patch("/{cheque_id}", response_model=schemas.ChequeResponse)
-def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, db: Session = Depends(get_db)):
+def actualizar_estado_cheque(
+    cheque_id: str,
+    update_data: schemas.ChequeUpdate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_cheque = obtener_o_404(db, models.Cheque, cheque_id, "Cheque no encontrado")
 
     cambios = update_data.model_dump(exclude_unset=True)
@@ -113,22 +137,30 @@ def actualizar_estado_cheque(cheque_id: str, update_data: schemas.ChequeUpdate, 
     # igual al crear y al editar; acá ya llega resuelta.
 
     # Historial: primero los cambios de monto/clasificación, después el de estado.
+    # Los mismos textos alimentan el asiento de auditoría, que agrega el quién:
+    # armarlos de nuevo con auditoria.cambios() sería tener dos versiones de la
+    # misma frase esperando a divergir.
+    detalles = []
     for campo in ("monto", "clasificacion"):
         if campo in cambios and cambios[campo] != getattr(db_cheque, campo):
-            _asentar(
-                db, db_cheque.id,
-                detalle=f"{campo} {getattr(db_cheque, campo)} -> {cambios[campo]}",
-            )
+            detalle = f"{campo} {getattr(db_cheque, campo)} -> {cambios[campo]}"
+            detalles.append(detalle)
+            _asentar(db, db_cheque.id, detalle=detalle)
 
     if cambia_estado:
         detalle = f"Estado {estado_actual} -> {nuevo_estado}"
         if motivo:
             detalle += f" (motivo: {motivo})"
+        detalles.append(detalle)
         _asentar(db, db_cheque.id, detalle=detalle,
                  estado_anterior=estado_actual, estado_nuevo=nuevo_estado)
 
     for key, value in cambios.items():
         setattr(db_cheque, key, value)
+
+    if detalles:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_cheque.id,
+                _resumen(db_cheque), "; ".join(detalles))
 
     db.commit()
     db.refresh(db_cheque)
@@ -145,7 +177,11 @@ def historial_cheque(cheque_id: str, db: Session = Depends(get_db)):
     )
 
 @router.delete("/{cheque_id}")
-def eliminar_cheque(cheque_id: str, db: Session = Depends(get_db)):
+def eliminar_cheque(
+    cheque_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_cheque = obtener_o_404(db, models.Cheque, cheque_id, "Cheque no encontrado")
 
     # Un cheque cobrado o endosado ya movió plata: borrarlo distorsiona ingresos y ganancia.
@@ -157,6 +193,11 @@ def eliminar_cheque(cheque_id: str, db: Session = Depends(get_db)):
                 "porque ya impactó los ingresos. Marcalo como 'Rechazado' si corresponde."
             ),
         )
+
+    # El historial del cheque se va con él; el asiento de auditoría no, y es lo
+    # único que va a quedar para decir que ese documento existió.
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_cheque.id,
+            _resumen(db_cheque), f"estaba en '{db_cheque.estado}'")
 
     # El historial no sobrevive al cheque: sin la fila padre queda huérfano.
     db.query(models.HistorialCheque).filter(

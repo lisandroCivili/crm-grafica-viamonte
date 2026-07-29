@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from decimal import Decimal, ROUND_HALF_UP
 import models, schemas
+from auditoria import asentar, cambios
 from database import get_db
 from datetime import date
 from money import Q2, Q3
 from routers._comun import obtener_o_404
-from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin
+from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin, usuario_actual
 
 # Entran los tres puestos: el papel lo controla y lo repone el taller, no el
 # dueño. Borrar un artículo sí queda sólo para el dueño (se lleva puesto el
@@ -19,6 +20,17 @@ router = APIRouter(
 
 # (Largo cm x Ancho cm x Gramaje grs) / 10.000.000 = peso de 1 pliego en Kg
 DIVISOR_PESO_PLIEGO = Decimal("10000000")
+
+# Cómo se llama esta entidad en el registro de auditoría.
+#
+# Convive con HistorialStock, que no se toca: aquél registra el movimiento de
+# papel con su motivo y es lo que alimenta el costo; éste registra QUIÉN lo hizo,
+# que es lo que a HistorialStock le falta, y para cualquier campo del artículo.
+ENTIDAD = "Stock"
+
+# El PATCH pisa ultima_actualizacion en cada llamada, cambie algo o no: dejarla
+# en el diff haría que editar nada asentara "ultima_actualizacion: ayer -> hoy".
+CAMPOS_SIN_INTERES = ("ultima_actualizacion",)
 
 
 def _calcular_pliegos(largo_cm, ancho_cm, gramaje_grs, peso_total_kg, pos: int) -> Decimal:
@@ -65,8 +77,14 @@ def _calcular_pliegos(largo_cm, ancho_cm, gramaje_grs, peso_total_kg, pos: int) 
     return pliegos
 
 
-def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) -> models.ArticuloStock:
-    """Aplica un ítem del carrito: recompra (suma al existente) o alta nueva."""
+def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int,
+                          usuario: models.Usuario) -> models.ArticuloStock:
+    """Aplica un ítem del carrito: recompra (suma al existente) o alta nueva.
+
+    Recibe el usuario porque cada ítem deja su propio asiento de auditoría: una
+    compra de cinco papeles son cinco entradas de stock distintas y agruparlas
+    en una sola fila haría que no se pueda rastrear ninguna.
+    """
     articulo = None
     if item.articulo_id:
         articulo = obtener_o_404(db, models.ArticuloStock, item.articulo_id, f"Ítem {pos}: artículo con ID {item.articulo_id} no encontrado.")
@@ -139,6 +157,9 @@ def _procesar_item_compra(db: Session, item: schemas.CompraStockItem, pos: int) 
         diferencia=cantidad,
         motivo=f"Alta inicial. {motivo}" if es_alta else motivo,
     ))
+    asentar(db, usuario,
+            models.ACCION_ALTA if es_alta else models.ACCION_EDICION,
+            ENTIDAD, articulo.id, articulo.nombre, motivo)
     return articulo
 
 @router.get("/", response_model=list[schemas.StockResponse])
@@ -146,22 +167,32 @@ def listar_stock(db: Session = Depends(get_db)):
     return db.query(models.ArticuloStock).order_by(models.ArticuloStock.nombre).all()
 
 @router.post("/", response_model=schemas.StockResponse)
-def crear_articulo(art: schemas.StockCreate, db: Session = Depends(get_db)):
+def crear_articulo(
+    art: schemas.StockCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     nuevo = models.ArticuloStock(**art.model_dump())
     db.add(nuevo)
     # Igual que en las compras: la cantidad nunca entra sin dejar asiento.
     db.flush()
+    motivo = f"Alta inicial: +{Q3(nuevo.cantidad)} {nuevo.unidad}"
     db.add(models.HistorialStock(
         articulo_id=nuevo.id,
         diferencia=Q3(nuevo.cantidad),
-        motivo=f"Alta inicial: +{Q3(nuevo.cantidad)} {nuevo.unidad}",
+        motivo=motivo,
     ))
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo.id, nuevo.nombre, motivo)
     db.commit()
     db.refresh(nuevo)
     return nuevo
 
 @router.post("/compras", response_model=list[schemas.StockResponse], status_code=status.HTTP_201_CREATED)
-def registrar_compra(items: list[schemas.CompraStockItem], db: Session = Depends(get_db)):
+def registrar_compra(
+    items: list[schemas.CompraStockItem],
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Registra una compra de 1 o más ítems (carrito) en una sola transacción.
 
     Cada ítem puede ser un alta nueva o una recompra (articulo_id): la recompra
@@ -173,7 +204,7 @@ def registrar_compra(items: list[schemas.CompraStockItem], db: Session = Depends
         raise HTTPException(status_code=400, detail="La compra debe incluir al menos un ítem.")
 
     try:
-        articulos = [_procesar_item_compra(db, item, pos) for pos, item in enumerate(items, start=1)]
+        articulos = [_procesar_item_compra(db, item, pos, usuario) for pos, item in enumerate(items, start=1)]
         db.commit()
     except Exception:
         db.rollback()
@@ -184,7 +215,12 @@ def registrar_compra(items: list[schemas.CompraStockItem], db: Session = Depends
     return articulos
 
 @router.patch("/{articulo_id}")
-def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: Session = Depends(get_db)):
+def actualizar_cantidad(
+    articulo_id: str,
+    update_data: schemas.StockUpdate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_art = obtener_o_404(db, models.ArticuloStock, articulo_id, "Artículo no encontrado")
 
     # Campos descriptivos: se pisan directo, no generan historial (el historial es solo para cantidad)
@@ -210,6 +246,11 @@ def actualizar_cantidad(articulo_id: str, update_data: schemas.StockUpdate, db: 
         db_art.costo_unitario = update_data.costo_unitario
 
     db_art.ultima_actualizacion = date.today()
+
+    detalle = cambios(db_art, ocultar=CAMPOS_SIN_INTERES)
+    if detalle:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_art.id, db_art.nombre, detalle)
+
     db.commit()
     return {"mensaje": "Stock actualizado"}
 
@@ -219,7 +260,11 @@ def ver_historial(articulo_id: str, db: Session = Depends(get_db)):
     return db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).order_by(models.HistorialStock.fecha.desc()).all()
 
 @router.delete("/{articulo_id}", dependencies=[Depends(solo_admin)])
-def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
+def eliminar_articulo(
+    articulo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_art = obtener_o_404(db, models.ArticuloStock, articulo_id, "Artículo no encontrado")
 
     lo_usa_un_trabajo = db.query(models.Trabajo).filter(models.Trabajo.papel_id == articulo_id).first()
@@ -233,6 +278,11 @@ def eliminar_articulo(articulo_id: str, db: Session = Depends(get_db)):
     lo_usa_un_presupuesto = db.query(models.ItemPresupuesto).filter(models.ItemPresupuesto.papel_id == articulo_id).first()
     if lo_usa_un_presupuesto:
         raise HTTPException(status_code=400, detail="No se puede eliminar: hay presupuestos que usan este artículo como papel.")
+
+    # Borrar el artículo se lleva puesto su historial de movimientos: el asiento
+    # de auditoría es lo único que va a sobrevivir para decir que existió.
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_art.id, db_art.nombre,
+            f"quedaban {db_art.cantidad} {db_art.unidad}")
 
     # El historial de ajustes pertenece al artículo: se borra junto con él.
     db.query(models.HistorialStock).filter(models.HistorialStock.articulo_id == articulo_id).delete()

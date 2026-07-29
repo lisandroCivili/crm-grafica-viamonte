@@ -6,12 +6,13 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 import models, schemas
+from auditoria import asentar, cambios
 from database import get_db
 from calculos import sumar_detalles_costos, calcular_saldo_trabajo
 from money import Q2
 from pdf import construir_presupuesto_pdf
 from routers._comun import obtener_o_404
-from seguridad import solo_admin
+from seguridad import solo_admin, usuario_actual
 # El papel del presupuesto se valida con las mismas reglas que el del trabajo
 # (que exista, que se mida en pliegos, que la cantidad sea un entero positivo y
 # que papel y pliegos vayan juntos). Vive en papel.py, un módulo compartido, para
@@ -28,6 +29,20 @@ router = APIRouter(
     tags=["Presupuestos"],
     dependencies=[Depends(solo_admin)],
 )
+
+
+# Cómo se llama esta entidad en el registro de auditoría.
+ENTIDAD = "Presupuesto"
+
+
+def _resumen(presupuesto: models.Presupuesto) -> str:
+    """Cómo se nombra este presupuesto en el registro de auditoría.
+
+    Por el número de comprobante, que es como se lo pide por teléfono. El
+    cliente es opcional: un borrador puede no tenerlo todavía.
+    """
+    quien = presupuesto.cliente.nombre_completo if presupuesto.cliente else "sin cliente"
+    return f"{presupuesto.numero_secuencia or 's/n'} ({quien})"
 
 
 def _fecha(valor) -> str:
@@ -83,7 +98,11 @@ def _construir_item(db: Session, item: schemas.ItemPresupuestoCreate, orden: int
 
 
 @router.post("/", response_model=schemas.PresupuestoResponse)
-def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depends(get_db)):
+def crear_presupuesto(
+    presupuesto: schemas.PresupuestoCreate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     # El cliente es opcional (borrador sin cliente). Solo si viene, validamos que exista.
     if presupuesto.cliente_id:
         obtener_o_404(db, models.Cliente, presupuesto.cliente_id, "El cliente indicado no existe.")
@@ -122,6 +141,9 @@ def crear_presupuesto(presupuesto: schemas.PresupuestoCreate, db: Session = Depe
         nuevo_presupuesto.estado = db_trabajo.estado
 
     db.add(nuevo_presupuesto)
+    db.flush()  # necesitamos el id para el asiento de auditoría
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_presupuesto.id,
+            _resumen(nuevo_presupuesto), f"{len(nuevo_presupuesto.items)} ítem(s)")
     db.commit()
     db.refresh(nuevo_presupuesto)
     return nuevo_presupuesto
@@ -243,7 +265,12 @@ def pdf_cliente(presupuesto_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{presupuesto_id}", response_model=schemas.PresupuestoResponse)
-def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.PresupuestoUpdate, db: Session = Depends(get_db)):
+def actualizar_presupuesto(
+    presupuesto_id: str,
+    presupuesto_update: schemas.PresupuestoUpdate,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if db_presupuesto.convertido_a_trabajo:
@@ -271,13 +298,28 @@ def actualizar_presupuesto(presupuesto_id: str, presupuesto_update: schemas.Pres
             for i, item in enumerate(presupuesto_update.items)
         ]
 
+    # Los ítems son una relación, no columnas: cambios() no los ve. Reemplazar la
+    # lista es LA edición típica de un presupuesto (se corrige un precio, se saca
+    # un producto), así que sin esta línea el asiento diría que no pasó nada.
+    partes = [cambios(db_presupuesto)]
+    if presupuesto_update.items is not None:
+        partes.append(f"ítems reemplazados ({len(db_presupuesto.items)})")
+    detalle = "; ".join(parte for parte in partes if parte)
+    if detalle:
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_presupuesto.id,
+                _resumen(db_presupuesto), detalle)
+
     db.commit()
     db.refresh(db_presupuesto)
     return db_presupuesto
 
 
 @router.delete("/{presupuesto_id}")
-def eliminar_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
+def eliminar_presupuesto(
+    presupuesto_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
 
     if db_presupuesto.convertido_a_trabajo:
@@ -287,13 +329,20 @@ def eliminar_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
     if tiene_versiones:
         raise HTTPException(status_code=400, detail="No se puede eliminar: existen versiones/duplicados hechos a partir de este presupuesto.")
 
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_presupuesto.id,
+            _resumen(db_presupuesto))
+
     db.delete(db_presupuesto)
     db.commit()
     return {"mensaje": "Presupuesto eliminado"}
 
 
 @router.post("/{presupuesto_id}/convertir", response_model=list[schemas.TrabajoResponse])
-def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
+def convertir_presupuesto(
+    presupuesto_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Convierte un presupuesto en trabajos en una sola transacción.
 
     Crea UN TRABAJO POR ÍTEM (cada producto se produce por separado) y marca el
@@ -336,6 +385,15 @@ def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
     db_presupuesto.convertido_a_trabajo = True
     db_presupuesto.estado = "Aprobado"
 
+    # Es la acción que hace nacer los trabajos: el asiento va contra el
+    # presupuesto (que es lo que se apretó) y nombra los trabajos que salieron,
+    # para poder ir de uno al otro sin adivinar.
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_presupuesto.id,
+            _resumen(db_presupuesto),
+            "convertido en " + ", ".join(
+                f"{t.cantidad}x {t.descripcion_producto}" for t in trabajos_creados
+            ))
+
     db.commit()
     for t in trabajos_creados:
         db.refresh(t)
@@ -343,7 +401,12 @@ def convertir_presupuesto(presupuesto_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{presupuesto_id}/convertir/{trabajo_id}", response_model=schemas.PresupuestoResponse)
-def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depends(get_db)):
+def marcar_convertido(
+    presupuesto_id: str,
+    trabajo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
     """Asocia un presupuesto (de un solo ítem) a un trabajo ya existente.
 
     Sólo tiene sentido con un único ítem: es ese ítem el que se vincula.
@@ -370,6 +433,10 @@ def marcar_convertido(presupuesto_id: str, trabajo_id: str, db: Session = Depend
     db_presupuesto.items[0].trabajo_id = trabajo_id
     db_presupuesto.convertido_a_trabajo = True
     db_presupuesto.estado = "Aprobado"
+
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_presupuesto.id,
+            _resumen(db_presupuesto), f"asociado al trabajo {trabajo_id}")
+
     db.commit()
     db.refresh(db_presupuesto)
     return db_presupuesto
