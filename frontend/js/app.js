@@ -172,6 +172,7 @@ function iniciarApp() {
     siPuede('tab-stock', cargarStock);
     siPuede('tab-cheques', cargarCheques);
     siPuede('tab-asistencia', cargarPlanilla, inicializarPeriodoResumen);
+    siPuede('tab-auditoria', cargarAuditoria);
     siPuede('tab-manual', cargarManual);
 }
 

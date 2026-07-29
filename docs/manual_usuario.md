@@ -12,25 +12,43 @@ más comunes y qué hacer ante cada uno.
 
 ## 1. Acceso al sistema
 
-Al abrir el sistema aparece una pantalla de login. Se ingresa con usuario y
-contraseña provistos por quien administra el sistema.
+Al abrir el sistema aparece una pantalla de login. **Cada persona tiene su
+propio usuario y su propia contraseña**: no se comparten. La sesión dura una
+jornada de trabajo; al día siguiente hay que volver a entrar.
 
-Una vez adentro, el menú lateral izquierdo tiene una sección por módulo:
-Dashboard, Trabajos, Presupuestos, Clientes, Cheques, Gastos, Stock y
-Asistencia. Al pie del menú hay dos acciones siempre disponibles:
+Una vez adentro, el menú lateral izquierdo tiene una sección por módulo. **No
+todos ven lo mismo**: cada usuario tiene un puesto asignado y sólo le aparecen
+las pestañas de su puesto.
 
-- **Descargar Respaldo**: descarga un archivo con una copia completa de la
-  base de datos del sistema a la fecha. Sirve como resguardo ante un problema
-  de la computadora. Conviene guardarlo en otro lugar (pendrive, nube) de vez
-  en cuando.
+| Puesto | Qué ve |
+|---|---|
+| **Administración** | Todo. |
+| **Encargado de taller** | Trabajos, Clientes, Stock y Asistencia. No ve los precios de los trabajos ni el saldo de los clientes. |
+| **Mostrador** | Trabajos, Clientes, Stock y Gastos. Tampoco ve precios ni saldos. |
+
+Dar de alta un trabajo y borrar cosas (clientes, trabajos, gastos, artículos de
+stock) queda siempre para Administración.
+
+Al pie del menú hay dos acciones:
+
+- **Descargar Respaldo** (sólo Administración): descarga un archivo con una
+  copia completa de la base de datos a la fecha. Conviene bajarlo una vez por
+  semana y guardarlo en otro lugar (pendrive, nube): es el único resguardo
+  propio si algo se rompe del lado del servidor.
 - **Cerrar Sesión**: vuelve a la pantalla de login.
 
-> **¿Por qué funciona así?**
-> El sistema corre en la propia computadora del taller (no en internet), así
-> que el usuario y contraseña son fijos y compartidos. Es una limitación
-> conocida y aceptable mientras el sistema se use solo en esa red local; si
-> algún día se necesitara acceder desde afuera, este esquema debería
-> reforzarse antes.
+> **¿Por qué cada uno tiene su usuario y no ve todo?**
+> El sistema dejó de estar en una sola computadora: ahora se entra por
+> internet, desde el taller o desde donde sea. Con varias personas usando lo
+> mismo, dos cosas cambian. Una es que los precios y la cuenta corriente de los
+> clientes son información del negocio y no hacen falta para producir. La otra
+> es que, teniendo cada uno su usuario, **el sistema puede registrar quién hizo
+> cada cosa** (ver la sección 11, Auditoría) — con un usuario compartido eso
+> sería imposible.
+
+> **Si alguien deja de trabajar en el taller**, se le da de baja el usuario y
+> queda afuera en el acto, incluso si tenía la sesión abierta. Lo que hizo
+> mientras trabajaba sigue registrado a su nombre.
 
 ---
 
@@ -433,7 +451,60 @@ aviso de error.
 
 ---
 
-## 11. Preguntas frecuentes y mensajes de error comunes
+## 11. Auditoría
+
+Sólo la ve Administración. Es la respuesta a "¿quién me tocó esto?".
+
+### Cómo se usa
+
+La pestaña muestra una lista de todo lo que se modificó en el sistema, de lo
+más reciente a lo más viejo. Cada renglón dice **cuándo**, **quién**, **qué
+hizo** y **sobre qué**:
+
+| Fecha | Quién | Acción | Qué | Detalle |
+|---|---|---|---|---|
+| 28/07 14:32 | marcos | editó | Trabajo OP-000012 (Juan Pérez) | estado: Aprobado -> En Diseño |
+| 28/07 11:05 | facundo | eliminó | Gasto Tinta negra — $ 45000 (Insumos) | |
+| 28/07 09:14 | lucio | creó | Cliente Ana Gómez | |
+
+Arriba hay cuatro filtros que se combinan entre sí:
+
+- **Qué**: el módulo (Trabajos, Clientes, Gastos, Stock…).
+- **Quién**: el nombre de usuario de la persona.
+- **Desde / Hasta**: el rango de fechas, ambas incluidas.
+
+Se muestran hasta 200 movimientos por vez. Si la lista llega a ese tope, al pie
+aparece un aviso: hay más atrás y conviene acotar las fechas.
+
+### Qué queda registrado
+
+Todo lo que modifica datos: altas, ediciones y borrados de trabajos,
+presupuestos, clientes, pagos, cheques, gastos, stock, notas, empleados y la
+planilla de asistencia. También **los ingresos al sistema** y los **intentos
+fallidos** (alguien tipeando mal la contraseña, o probando).
+
+Lo que **no** deja renglón es mirar. Entrar a una pantalla, abrir una ficha o
+descargar un PDF ya emitido no cambia nada, así que no figura.
+
+> **¿Por qué no se puede borrar ni corregir un renglón?**
+> Porque entonces no serviría para nada: cualquiera que quisiera tapar algo
+> borraría primero la fila que lo delata. Por eso la pantalla no tiene botón de
+> editar ni de eliminar, y el sistema tampoco tiene forma de hacerlo por
+> ningún otro lado. El registro sólo se lee.
+
+> **¿Y si borro un trabajo? ¿Se pierde su historial?**
+> No. El renglón de auditoría sobrevive a lo que registra: aunque el trabajo,
+> el cliente o el cheque ya no existan, queda la constancia de que existieron,
+> quién los borró y cuándo. En un borrado el renglón guarda además los datos
+> que importaban (el monto de un gasto, el banco y número de un cheque), que si
+> no se perderían con la ficha.
+
+> **Los renglones no dicen "Marcos" sino "marcos"**, en minúscula: es el nombre
+> de usuario con el que entró, no cómo se escribe el nombre de la persona.
+
+---
+
+## 12. Preguntas frecuentes y mensajes de error comunes
 
 **"Este DNI/CUIT ya está registrado."**
 Ya existe un cliente con ese número. Buscalo en el listado en vez de crear

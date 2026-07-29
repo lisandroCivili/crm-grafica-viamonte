@@ -52,6 +52,7 @@
         <div class="nav-item" data-tab="tab-gastos" onclick="switchTab('tab-gastos', this)">📉 Gastos</div>
         <div class="nav-item" data-tab="tab-stock" onclick="switchTab('tab-stock', this)">📦 Stock</div>
         <div class="nav-item" data-tab="tab-asistencia" onclick="switchTab('tab-asistencia', this)">🕒 Asistencia</div>
+        <div class="nav-item" data-tab="tab-auditoria" onclick="switchTab('tab-auditoria', this)">🔍 Auditoría</div>
         <div class="nav-item" data-tab="tab-manual" onclick="switchTab('tab-manual', this)">📖 Manual</div>
 
         <div style="margin-top: auto; flex-shrink: 0; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 5px;">
@@ -509,6 +510,84 @@
           </thead>
           <tbody>
             <tr><td colspan="6" style="text-align:center; color:var(--muted);">Cargando stock...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- AUDITORÍA -->
+    <!-- Sólo la ve el dueño: el mapa de pestañas por puesto está en core.js
+         (PERMISOS) y esta no figura en las listas de encargado ni mostrador. El
+         backend igual responde 403, esto sólo evita mostrar lo que va a fallar. -->
+    <section id="tab-auditoria" class="view-section">
+      <div class="topbar">
+        <div>
+          <h1>Auditoría</h1>
+          <div class="sub" style="color: var(--muted); margin-top: 4px;">Quién modificó qué y cuándo</div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 15px; margin-top: 20px; align-items: flex-end; flex-wrap: wrap; background: var(--paper); padding: 15px; border-radius: 8px; border: 1px solid var(--line);">
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Qué</label>
+          <!-- La lista va escrita acá, igual que las categorías de gasto: son
+               las constantes ENTIDAD de cada router y no cambian solas. -->
+          <select id="filtro-entidad-auditoria" onchange="cargarAuditoria()" style="padding: 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;">
+            <option value="">Todo</option>
+            <option value="Trabajo">Trabajos</option>
+            <option value="Presupuesto">Presupuestos</option>
+            <option value="Cliente">Clientes</option>
+            <option value="Movimiento">Pagos y movimientos</option>
+            <option value="Cheque">Cheques</option>
+            <option value="Gasto">Gastos</option>
+            <option value="Stock">Stock</option>
+            <option value="Nota">Notas</option>
+            <option value="Empleado">Empleados</option>
+            <option value="Asistencia">Asistencia</option>
+            <option value="Sesión">Ingresos al sistema</option>
+          </select>
+        </div>
+
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Quién</label>
+          <input type="text" id="filtro-usuario-auditoria" placeholder="Nombre de usuario"
+                 onchange="cargarAuditoria()"
+                 style="padding: 8px; border: 1px solid var(--line); border-radius: 6px;">
+        </div>
+
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Desde</label>
+          <input type="date" id="filtro-desde-auditoria" onchange="cargarAuditoria()"
+                 style="padding: 8px; border: 1px solid var(--line); border-radius: 6px;">
+        </div>
+
+        <div style="display: flex; flex-direction: column;">
+          <label style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Hasta</label>
+          <input type="date" id="filtro-hasta-auditoria" onchange="cargarAuditoria()"
+                 style="padding: 8px; border: 1px solid var(--line); border-radius: 6px;">
+        </div>
+
+        <button class="btn" style="background: var(--ink);" onclick="limpiarFiltrosAuditoria()">Limpiar filtros</button>
+
+        <div style="margin-left: auto; text-align: right;">
+          <div style="font-size: 12px; color: var(--muted);">Movimientos</div>
+          <div id="lbl-total-auditoria" style="font-size: 22px; font-weight: bold;">0</div>
+        </div>
+      </div>
+
+      <div class="table-container" style="margin-top: 20px;">
+        <table id="tableAuditoria">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Quién</th>
+              <th>Acción</th>
+              <th>Qué</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" style="text-align:center; color:var(--muted);">Cargando…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1343,6 +1422,7 @@
     <script src="js/dashboard.js"></script>
     <script src="js/cheques.js"></script>
     <script src="js/asistencia.js"></script>
+    <script src="js/auditoria.js"></script>
     <script src="js/manual.js"></script>
     <script src="js/app.js"></script>
   </body>
