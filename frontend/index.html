@@ -37,6 +37,11 @@
       </div>
     </div>
 
+    <!-- Botón del menú y telón: sólo se ven en pantalla chica, donde el sidebar
+         está corrido fuera de la pantalla. El telón va DESPUÉS del sidebar
+         porque el CSS lo muestra con el selector de hermano (#sidebar.open ~). -->
+    <button id="btn-menu" class="no-print" onclick="toggleSidebar()" aria-label="Abrir menú">☰</button>
+
     <!-- SIDEBAR -->
     <aside id="sidebar">
       <div class="brand">
@@ -64,6 +69,7 @@
         </div>
       </nav>
     </aside>
+    <div id="sidebar-backdrop" class="no-print" onclick="cerrarSidebar()"></div>
 
     <!-- CONTENIDO PRINCIPAL -->
     <main id="main">
@@ -179,21 +185,26 @@
       </div>
 
       <!-- BLOQUE 2: GRÁFICOS -->
-      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 25px;">
+      <!-- El grid está en una clase y no inline porque un style inline le gana a
+           la media query, y en el celular estas dos columnas tienen que apilarse. -->
+      <div class="dashboard-graficos">
         <!-- Gráfico de Flujo de Caja (Barras) -->
         <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line);">
           <h3 style="font-size: 14px; margin-bottom: 15px; color: var(--ink);">Flujo de Caja Anual</h3>
-          <canvas id="chartFlujo" height="100"></canvas>
+          <!-- El alto lo fija el contenedor y Chart.js lo respeta
+               (maintainAspectRatio: false en dashboard.js): con el alto del
+               canvas solo, en pantalla angosta el gráfico quedaba aplastado. -->
+          <div class="chart-box"><canvas id="chartFlujo"></canvas></div>
         </div>
 
         <!-- Gráfico de Egresos (Torta) -->
         <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--line);">
           <h3 style="font-size: 14px; margin-bottom: 15px; color: var(--ink);">Distribución de Gastos</h3>
-          <canvas id="chartDistribucion" height="200"></canvas>
+          <div class="chart-box"><canvas id="chartDistribucion"></canvas></div>
         </div>
       </div>
       <!-- BLOQUE 3: ALERTAS Y SEMÁFOROS -->
-      <div style="margin-top: 25px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+      <div class="dashboard-alertas">
         
         <!-- Plata Estancada (Taller) -->
         <div style="background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--amber); border-left: 5px solid var(--amber);">
@@ -244,10 +255,16 @@
 
         <!-- Los trabajos cancelados salen del tablero. Este check los trae de
              vuelta (atenuados, en la primera columna) para poder reactivarlos. -->
-        <div class="no-print" style="margin-bottom:10px;">
+        <div class="no-print" style="margin-bottom:10px; display:flex; gap:18px; flex-wrap:wrap;">
           <label style="font-size:12px; color:var(--muted); cursor:pointer;">
             <input type="checkbox" id="chk-ver-cancelados" onchange="cargarTrabajos()" />
             Mostrar trabajos cancelados
+          </label>
+          <!-- Los entregados viejos (y los que se quitaron a mano) no vienen del
+               backend: este check los pide para poder devolverlos al tablero. -->
+          <label style="font-size:12px; color:var(--muted); cursor:pointer;">
+            <input type="checkbox" id="chk-ver-historial" onchange="cargarTrabajos()" />
+            Ver historial completo de entregados
           </label>
         </div>
 
@@ -262,7 +279,11 @@
           <h4 style="color:var(--amber)">En Producción</h4>
         </div>
         <div class="kanban-col" id="col-entregado" style="background:#dbf0e3;" ondrop="soltarTarjeta(event, 'Entregado')" ondragover="permitirSoltar(event)">
-          <h4 style="color:var(--green)">Entregado</h4>
+          <!-- La aclaración va acá adentro y no afuera porque cargarTrabajos()
+               reconstruye la columna dejando sólo su primer hijo: este h4. -->
+          <h4 style="color:var(--green)">Entregado
+            <span class="ayuda" tabindex="0" data-ayuda="Se muestran los entregados de los últimos 15 días. Los más viejos salen del tablero, pero no se borran: el historial completo de cada cliente está en su ficha.">?</span>
+          </h4>
         </div>
       </div>
       </section>
@@ -327,20 +348,22 @@
         </div>
 
         <div class="panel">
-          <table id="tableClientes">
-            <thead>
-              <tr>
-                <th>Cliente / Razón Social</th>
-                <th>Contacto / Empresa</th>
-                <th>DNI / CUIT</th>
-                <th class="solo-admin">Saldo Cta Cte</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Acá se inyectan los clientes con app.js -->
-            </tbody>
-          </table>
+          <div class="table-container">
+            <table id="tableClientes">
+              <thead>
+                <tr>
+                  <th>Cliente / Razón Social</th>
+                  <th>Contacto / Empresa</th>
+                  <th>DNI / CUIT</th>
+                  <th class="solo-admin">Saldo Cta Cte</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Acá se inyectan los clientes con app.js -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -714,7 +737,10 @@
 
       <!-- DRAWER: FICHA DEL CLIENTE -->
     <!-- DRAWER: FICHA DEL CLIENTE -->
-    <div id="drawer-cliente" class="drawer" style="width: 600px;">
+    <!-- El ancho extra (es el drawer más cargado: saldo + tres solapas) vive en
+         el CSS y no acá: un style inline le gana a la media query de pantalla
+         chica y el panel quedaría más ancho que el teléfono. -->
+    <div id="drawer-cliente" class="drawer">
       <button class="close-drawer" onclick="toggleDrawer('drawer-cliente')">✖</button>
       
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
@@ -753,12 +779,16 @@
           <button class="btn" style="background: var(--green);" onclick="abrirDrawerPago()">+ Registrar Pago</button>
           <button class="btn secondary" onclick="descargarMovimientosPDF()">⬇️ Descargar PDF</button>
         </div>
-        <table id="tabla-movimientos">
-          <thead><tr><th>Fecha</th><th>Detalle</th><th>Monto</th><th style="text-align:center;">Acciones</th></tr></thead>
-          <tbody>
-             <!-- Inyectados por JS -->
-          </tbody>
-        </table>
+        <!-- El wrapper le da el scroll lateral en pantalla chica. La captura a
+             PDF sigue apuntando a la tabla, así que no la afecta. -->
+        <div class="table-container">
+          <table id="tabla-movimientos">
+            <thead><tr><th>Fecha</th><th>Detalle</th><th>Monto</th><th style="text-align:center;">Acciones</th></tr></thead>
+            <tbody>
+               <!-- Inyectados por JS -->
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- 3. CONTENIDO: NOTAS -->

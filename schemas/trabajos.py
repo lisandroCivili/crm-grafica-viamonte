@@ -84,6 +84,9 @@ class TrabajoResponse(TrabajoBase):
     remito_impreso: bool = False
     numero_remito: Optional[str] = None
     fecha_remito_impreso: Optional[datetime] = None
+    # Lo saca del tablero el endpoint /archivar, no un PUT: por eso va acá y no
+    # en TrabajoBase. El Kanban lo lee para atenuar la tarjeta y ofrecer volverla.
+    archivado: bool = False
     model_config = {"from_attributes": True}
 
 # Datos que se piden al pasar un trabajo de Aprobado a En Diseño.

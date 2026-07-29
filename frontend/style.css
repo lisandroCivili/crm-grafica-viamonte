@@ -38,6 +38,25 @@ nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 
 .nav-item:hover { background: rgba(255,255,255,.05); color: #fff; }
 .nav-item.active { background: var(--magenta); color: #fff; }
 
+/* Botón del menú y telón: existen sólo para la pantalla chica, donde el sidebar
+   se corre fuera de la vista. Acá van ocultos; los enciende el bloque de
+   pantallas chicas del final del archivo. */
+/* El z-index lo deja por DEBAJO de todo lo que se abre encima del contenido:
+   drawers (100), telón del menú (150), sidebar (200) y modales (1000). Así el
+   botón desaparece solo cuando hay un panel abierto, en vez de quedar flotando
+   arriba de la ficha del cliente. Cada uno de esos paneles se cierra con lo
+   suyo (la ✖ del drawer, el telón del menú), no con este botón. */
+#btn-menu {
+  display: none; position: fixed; top: 12px; left: 12px; z-index: 90;
+  width: 42px; height: 42px; align-items: center; justify-content: center;
+  background: var(--ink); color: #fff; border: none; border-radius: 8px;
+  font-size: 20px; cursor: pointer;
+}
+#sidebar-backdrop {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.45); z-index: 150;
+}
+
 /* CONTENIDO PRINCIPAL */
 #main { flex: 1; padding: 40px; position: relative; }
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
@@ -50,6 +69,14 @@ nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 
 .btn.secondary:hover { background: #fff; border-color: var(--muted); }
 .btn.pdf { background: #3b82f6; }
 .btn.pdf:hover { background: #1d4ed8; }
+/* Los botones de las tarjetas del Kanban. Estaban repetidos como style inline
+   en cada uno de los seis botones que arma trabajos.js. */
+.btn-mini { margin-top: 8px; padding: 4px 8px; font-size: 11px; }
+
+/* Sólo aparece en el celular (lo enciende el bloque del final del archivo).
+   Hoy lo usa el botón de mover una tarjeta, que en la PC no hace falta porque
+   ahí el tablero se maneja arrastrando. */
+.solo-mobile { display: none; }
 
 /* KPIS Y PANELES */
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 30px; }
@@ -57,6 +84,14 @@ nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 
 .kpi .label { font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
 .kpi .value { font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 600; margin-top: 8px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 4px rgba(0,0,0,.02); }
+
+/* Los dos bloques de abajo del Dashboard. Estaban como grid inline en el HTML,
+   donde ninguna media query podía alcanzarlos para apilarlos en el celular. */
+.dashboard-graficos { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 25px; }
+.dashboard-alertas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 25px; }
+/* Chart.js dibuja al tamaño del contenedor: sin un alto acá, el gráfico se
+   estira o se aplasta según el ancho que le toque. */
+.chart-box { position: relative; height: 260px; }
 
 /* TABLAS */
 table { width: 100%; border-collapse: collapse; text-align: left; }
@@ -73,6 +108,37 @@ tr:hover td { background: var(--magenta-soft); }
 .kanban-card .client { font-weight: 600; font-size: 13.5px; }
 .kanban-card .job { color: var(--muted); font-size: 12.5px; margin: 4px 0 8px; }
 .kanban-card .date { font-size: 11px; font-family: 'JetBrains Mono'; background: #f3eff2; padding: 2px 6px; border-radius: 4px; display: inline-block; }
+
+/* AYUDA CONTEXTUAL
+   El "?" que explica algo sin ocupar lugar: el texto va en data-ayuda y aparece
+   al pasar el mouse. Sirve en cualquier lado, no sólo en el Kanban.
+
+   Responde también a :focus-visible y los que lo usan llevan tabindex="0"
+   porque en un celular no existe el hover: sin eso el signo sería decorativo
+   justo para quien entra desde el teléfono. */
+.ayuda {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--muted); color: #fff;
+  font-size: 11px; font-weight: 700;
+  cursor: help; position: relative;
+}
+.ayuda::after {
+  content: attr(data-ayuda);
+  position: absolute; top: calc(100% + 8px); right: 0;
+  width: max-content; max-width: 32ch;
+  background: var(--ink); color: #fff;
+  padding: 8px 10px; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  /* El globo hereda del contenedor (el h4 del Kanban va en mayúsculas y
+     espaciado): se resetea acá para que el texto se lea como una frase. */
+  font-size: 11.5px; font-weight: 400; line-height: 1.4;
+  text-transform: none; letter-spacing: normal; text-align: left;
+  opacity: 0; visibility: hidden; transition: opacity .15s ease;
+  z-index: 50; pointer-events: none;
+}
+.ayuda:hover::after,
+.ayuda:focus-visible::after { opacity: 1; visibility: visible; }
 
 /* BUSCADOR */
 .search-wrapper { margin-bottom: 20px; }
@@ -91,6 +157,9 @@ tr:hover td { background: var(--magenta-soft); }
   z-index: 100; overflow-y: auto; border-left: 1px solid var(--line);
 }
 .drawer.open { right: 0; }
+/* Es el drawer más cargado del sistema (saldo del cliente + tres solapas), por
+   eso va más ancho que el resto. Estaba inline en el HTML. */
+#drawer-cliente { width: 600px; }
 .close-drawer { background: none; border: none; font-size: 20px; cursor: pointer; float: right; color: var(--muted); }
 .form-group { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 .form-group input { width: 120px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
@@ -158,6 +227,16 @@ tr:hover td { background: var(--magenta-soft); }
 /* Oculta las acciones de las tarjetas sólo mientras se captura la hoja de ruta en PDF. */
 .kanban-board.ocultar-acciones .no-print { display: none !important; }
 
+/* La misma clase, que generarInformeDiarioPDF() pone y saca alrededor de la
+   captura, congela el tablero en sus cuatro columnas. Si no, con la ventana
+   angosta html2pdf fotografía el tablero tal como se ve —deslizable y con las
+   columnas fuera de cuadro— y la hoja de ruta sale cortada. */
+.kanban-board.ocultar-acciones {
+  grid-auto-flow: row !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  overflow: visible !important;
+}
+
 /* MANUAL DE USUARIO (Markdown renderizado con marked.js) */
 #manual-contenido { max-width: 820px; line-height: 1.6; }
 #manual-contenido h1 { font-size: 26px; margin-bottom: 8px; }
@@ -178,3 +257,151 @@ tr:hover td { background: var(--magenta-soft); }
 #manual-contenido blockquote p { margin: 6px 0; }
 #manual-contenido code { background: var(--paper); font-family: 'JetBrains Mono'; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
 #manual-contenido hr { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
+
+/* =========================================================================
+   PANTALLAS CHICAS (celular)
+
+   El CRM también se usa desde el teléfono desde que está deployado, y hasta
+   acá todo el CSS era de escritorio fijo. Este bloque va último y sólo agrega:
+   nada de lo de arriba cambia, así que la PC del taller se ve igual que antes.
+
+   Los 768px van escritos y no como variable porque las media queries no leen
+   variables CSS. Si alguna vez cambia, hay que cambiarlo en cada @media.
+   ========================================================================= */
+@media (max-width: 768px) {
+
+  /* --- Navegación: el sidebar pasa a ser un menú que se corre --- */
+  #btn-menu { display: inline-flex; }
+  #sidebar {
+    position: fixed; top: 0; left: -100%;
+    width: 82vw; max-width: 300px;
+    z-index: 200; transition: left .3s ease;
+    box-shadow: 4px 0 15px rgba(0,0,0,.2);
+  }
+  #sidebar.open { left: 0; }
+  /* El telón se enciende solo cuando el menú está abierto: por eso en el HTML
+     va después del sidebar (selector de hermano posterior). */
+  #sidebar.open ~ #sidebar-backdrop { display: block; }
+
+  /* --- Contenido principal ---
+     El padding de arriba deja libre la esquina donde flota el botón del menú;
+     si no, tapa el título de cada sección. */
+  #main { padding: 68px 16px 24px; }
+  .topbar { flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+  .topbar h1 { font-size: 22px; }
+  .panel { padding: 16px; }
+
+  /* Las barras de filtros y de botones (gastos, stock, asistencia, buscadores)
+     están armadas con style="display: flex" inline y sin ninguna clase, así que
+     no hay a qué engancharse: el selector mira el atributo. Se puede agregar
+     flex-wrap desde acá porque un style inline sólo pisa las propiedades que
+     nombra, y ninguno de esos declara flex-wrap.
+
+     Es una red de contención, no un reemplazo del layout: en una pantalla ancha
+     el wrap no hace nada, y en una angosta los filtros bajan de renglón en vez
+     de desbordar. Sin esto, con body { overflow-x: hidden } lo que se sale
+     queda cortado y no hay forma de llegar. */
+  [style*="display: flex"],
+  [style*="display:flex"] { flex-wrap: wrap; }
+
+  /* --- Tablas ---
+     Hasta ahora .table-container era un div sin ninguna regla: con
+     body { overflow-x: hidden }, lo que se desbordaba quedaba cortado y no
+     había forma de llegar a esas columnas. El min-width es para que la tabla
+     no se comprima hasta partir cada palabra en una letra por renglón: es
+     preferible deslizarla de costado y que se lea. */
+  .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-container table { min-width: 600px; }
+  th { padding: 10px 8px; }
+  td { padding: 12px 8px; }
+
+  /* --- Paneles laterales ---
+     500px (600 el de cliente) es más que la pantalla de un teléfono: acá ocupan
+     todo el ancho. El right negativo tiene que ir en % para que siga saliendo
+     completo cuando se cierra. */
+  .drawer { width: 100%; right: -100%; padding: 20px 16px; }
+
+  /* El ancho de la ficha del cliente está declarado por ID más arriba, así que
+     hay que pisarlo con un selector de ID. Sólo el ancho: el right NO puede
+     repetirse acá, porque un ID le gana a .drawer.open y la ficha se quedaría
+     fuera de la pantalla aunque se la abriera. */
+  #drawer-cliente { width: 100%; }
+
+  /* --- Formularios ---
+     .form-group es el patrón de los once formularios del sistema: label a la
+     izquierda e input angosto a la derecha. En un teléfono no entran los dos en
+     la misma línea, así que se apilan. */
+  .form-group { flex-direction: column; align-items: stretch; gap: 6px; }
+  .form-group input:not([type="checkbox"]):not([type="radio"]) { width: 100%; text-align: left; }
+  .costo-row { flex-wrap: wrap; gap: 6px; }
+
+  /* Los campos de los drawers de cliente traen width:250px inline en el HTML.
+     Un inline sólo se puede pisar con !important, y acotado a este bloque es
+     preferible a repetir la corrección en diez atributos del HTML.
+
+     El :not() deja afuera a las casillas de tildar: hoy no hay ninguna dentro
+     de un drawer, pero una casilla estirada al ancho de la pantalla es un
+     desastre silencioso el día que alguien agregue la primera. */
+  .drawer input:not([type="checkbox"]):not([type="radio"]),
+  .drawer select,
+  .drawer textarea { width: 100% !important; }
+
+  /* Un ítem flex no se encoge por debajo de su contenido salvo que se le anule
+     el min-width automático. Sin esto, los pares de campos que van lado a lado
+     (categoría/proveedor en stock, emisión/cobro en cheques) empujan el drawer
+     a lo ancho en vez de achicarse. */
+  .drawer .form-group { min-width: 0; }
+
+  /* Las tres solapas de la ficha del cliente no entran en una línea de 360px.
+     El flex-wrap se puede agregar desde acá porque el style inline de ese div
+     declara display y gap, pero no flex-wrap: sólo pisa lo que nombra. */
+  .tabs-ficha { flex-wrap: wrap; }
+  .tabs-ficha .btn { padding: 8px 12px; font-size: 13px; }
+
+  /* --- Modales ---
+     El de presupuesto tiene width:550px inline; max-width le gana sin tocarlo. */
+  .modal-content { max-width: calc(100vw - 24px); padding: 20px 16px; }
+
+  /* Menos de 16px hace que Safari en iPhone agrande la pantalla solo al tocar
+     un campo, y deja el formulario corrido. No es una decisión de estética. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Un <select> mide lo que mide su opción más larga ("Servicios (Luz,
+     Internet)", "Costo Presupuestado", los nombres largos del stock), y con eso
+     no hay flex que lo encoja: el campo empuja y se sale de la pantalla. Hacen
+     falta las dos reglas: max-width acota el campo (el navegador recorta el
+     texto de la opción) y min-width:0 permite que el bloque que lo envuelve
+     ceda, porque un ítem flex conserva por defecto el ancho de su contenido. */
+  input, select, textarea { max-width: 100%; }
+  .topbar > *,
+  [style*="display: flex"] > div,
+  [style*="display:flex"] > div { min-width: 0; }
+
+  /* --- Tablero Kanban ---
+     Las cuatro columnas siguen una al lado de la otra, pero ocupando casi toda
+     la pantalla cada una: se pasa de etapa a etapa deslizando. El scroll-snap
+     hace que la columna calce sola en vez de quedar a mitad de camino. */
+  .kanban-board {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: 82vw;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+  .kanban-col { scroll-snap-align: start; min-height: 60vh; }
+
+  /* Se muestran los botones que en la PC no hacen falta (mover la tarjeta) y
+     todos los de las tarjetas crecen a un tamaño que se pueda tocar con el
+     dedo: 4px de padding son cómodos con un mouse, no con un pulgar. */
+  .solo-mobile { display: inline-flex; }
+  .btn-mini { padding: 9px 12px; font-size: 12px; width: 100%; justify-content: center; }
+
+  /* --- Dashboard ---
+     Gráficos y alertas, uno debajo del otro. El grid de KPIs no está acá
+     porque ya usa auto-fit y se acomoda solo. */
+  .dashboard-graficos,
+  .dashboard-alertas { grid-template-columns: 1fr; gap: 16px; }
+  .chart-box { height: 220px; }
+}

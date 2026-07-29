@@ -138,6 +138,28 @@ Producción → Entregado**. Los trabajos **Cancelados** salen del tablero por
 defecto (hay un check "Mostrar trabajos cancelados" para volver a verlos,
 atenuados, con un botón para reactivarlos).
 
+### Qué se ve en el tablero (y qué no)
+
+La columna **Entregado** muestra sólo los trabajos entregados en los **últimos
+15 días**. Pasado ese plazo la tarjeta sale sola del tablero: nada se borra ni
+se modifica, simplemente deja de ocupar lugar en la pantalla de trabajo. Sin
+ese corte, después de unos meses de uso la columna tendría cientos de tarjetas
+viejas y el tablero dejaría de servir para ver lo que hay que hacer hoy.
+
+Para encontrar un trabajo entregado hace tiempo (por ejemplo, para reimprimir
+un remito), se entra a la **ficha del cliente**, que lista su historial
+completo de trabajos sin límite de fecha.
+
+- **Quitar del tablero** (botón 📦 en la tarjeta): saca una tarjeta antes de
+  que se cumplan los 15 días, cuando ya se sabe que ese trabajo está cerrado y
+  no se quiere seguir viéndolo. Sólo aparece en los trabajos **Entregados** o
+  **Cancelados**: uno en curso no se puede sacar, porque el tablero es
+  justamente donde se lo sigue.
+- **Ver historial completo de entregados** (check arriba del tablero): trae
+  todos los entregados, incluidos los viejos y los que se quitaron a mano.
+  Aparecen atenuados y con un botón **📥 Volver al tablero** por si alguno se
+  quitó por error.
+
 ### Cómo se usa
 
 - **+ Nuevo Trabajo**: elegís el cliente, la descripción del producto, el
@@ -145,6 +167,11 @@ atenuados, con un botón para reactivarlos).
   (papel, medida, corte de pliego, tintas, troquelado, barniz, notas). Los
   datos de producción se pueden completar más adelante si todavía no se
   sabe.
+- **Desde el celular**: el tablero se desliza de costado para pasar de una
+  columna a otra, y cada tarjeta tiene un botón **↔️ Mover a...** para elegir la
+  etapa de una lista. Es el reemplazo del arrastre, que con el dedo no funciona.
+  Pide exactamente lo mismo que arrastrar: pasar a Diseño sigue pidiendo la
+  seña, y pasar a Producción sigue pidiendo los datos de la boleta.
 - **Pasar a "En Diseño"**: no es un simple arrastre en el tablero. El sistema
   pide usar el botón **Iniciar Diseño**, porque en ese paso hay que registrar
   lo que el cliente abonó como seña (puede ser $0, pero entonces hay que

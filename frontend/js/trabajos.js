@@ -1,5 +1,16 @@
 // Trabajos: alta, edicion, tablero Kanban y ordenes de produccion.
 
+// Las etapas del tablero y en qué columna cae cada una. Los nombres son los
+// mismos que valida el backend (models.ESTADOS_TRABAJO); "Cancelado" no está
+// porque no tiene columna propia. Sale de acá tanto el armado del tablero como
+// el menú de "Mover a", para que no haya dos listas que puedan desincronizarse.
+const COLUMNAS_KANBAN = {
+    "Aprobado": "col-pendiente",
+    "En Diseño": "col-diseno",
+    "En Producción": "col-produccion",
+    "Entregado": "col-entregado"
+};
+
 // ==========================================
 // EDICIÓN DE TRABAJOS (Historial automático)
 // ==========================================
@@ -297,8 +308,14 @@ function refrescarTablero() {
 
 async function soltarTarjeta(ev, nuevoEstado) {
     ev.preventDefault();
-    const id = ev.dataTransfer.getData("text");
+    return moverTrabajo(ev.dataTransfer.getData("text"), nuevoEstado);
+}
 
+// Lleva un trabajo a otra etapa. Está separado del drop porque el arrastre no
+// funciona con el dedo: en el celular se llega acá desde el botón "Mover a" de
+// la tarjeta. Las reglas de a dónde puede ir un trabajo viven todas acá, así
+// que el menú y el arrastre se comportan igual.
+async function moverTrabajo(id, nuevoEstado) {
     // No movemos el DOM de entrada: con los guards nuevos el backend rechaza
     // seguido. Dejamos que refrescarTablero() posicione la tarjeta según la
     // respuesta real, así nunca queda en una columna donde el backend no la puso.
@@ -329,6 +346,34 @@ async function soltarTarjeta(ev, nuevoEstado) {
         Swal.fire('No se pudo mover el trabajo', error.message, 'error');
         refrescarTablero();
     }
+}
+
+// Elegir a qué etapa mandar el trabajo desde un menú, en vez de arrastrarlo.
+// Es la única forma de mover una tarjeta en el celular: el drag & drop del
+// navegador no responde al dedo. En la PC el botón no se muestra.
+async function abrirMenuMover(id) {
+    const t = trabajosPorId.get(id);
+    if (!t) return;
+
+    // Todas las etapas menos en la que ya está: ofrecerla sería un movimiento
+    // que no hace nada.
+    const destinos = Object.keys(COLUMNAS_KANBAN).filter(estado => estado !== t.estado);
+
+    const { value: destino } = await Swal.fire({
+        title: 'Mover el trabajo a...',
+        input: 'radio',
+        inputOptions: Object.fromEntries(destinos.map(estado => [estado, estado])),
+        inputValidator: valor => !valor && 'Elegí una etapa',
+        showCancelButton: true,
+        confirmButtonText: 'Mover',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!destino) return;
+
+    // La misma función que usa el arrastre: iniciar diseño sigue pidiendo la
+    // seña y bajar a producción sigue pidiendo los datos de la boleta. Acá no
+    // se repite ninguna de esas reglas.
+    moverTrabajo(id, destino);
 }
 
 // Pide la seña (monto + método + motivo) y arranca el diseño.
@@ -622,12 +667,18 @@ async function descargarRemito(id) {
     }
 }
 async function cargarTrabajos() {
+    // El tablero pide sólo lo que va en el tablero (trabajos vivos + entregados
+    // recientes): si no, la columna "Entregado" se llena con todo lo que la
+    // gráfica entregó desde el primer día. Qué entra lo decide el backend
+    // (models.DIAS_ENTREGADO_EN_TABLERO), acá sólo se pide filtrado o completo.
+    const verHistorial = document.getElementById('chk-ver-historial')?.checked;
+
     // Los presupuestos son sólo del dueño (exponen costo y margen), así que para
     // los demás puestos ni se piden: sería un 403. Sin ellos no se puede saber
     // qué trabajo tiene presupuesto, y el distintivo simplemente no se muestra
     // (es información de rentabilidad, que es justo lo que no les toca ver).
     const [trabajos, clientes, presupuestos] = await Promise.all([
-        (await fetch(`${API_URL}/trabajos/`)).json(),
+        (await fetch(`${API_URL}/trabajos/${verHistorial ? '' : '?solo_tablero=true'}`)).json(),
         (await fetch(`${API_URL}/clientes/`)).json(),
         puedeVerPlata() ? (await fetch(`${API_URL}/presupuestos/`)).json() : []
     ]);
@@ -639,12 +690,10 @@ async function cargarTrabajos() {
         presupuestos.flatMap(p => (p.items || []).map(it => it.trabajo_id)).filter(Boolean)
     );
 
-    const cols = {
-        "Aprobado": document.getElementById('col-pendiente'),
-        "En Diseño": document.getElementById('col-diseno'),
-        "En Producción": document.getElementById('col-produccion'),
-        "Entregado": document.getElementById('col-entregado')
-    };
+    const cols = {};
+    Object.entries(COLUMNAS_KANBAN).forEach(([estado, idColumna]) => {
+        cols[estado] = document.getElementById(idColumna);
+    });
     Object.values(cols).forEach(col => { if(col) col.innerHTML = col.firstElementChild.outerHTML; });
 
     // Los cancelados están ocultos por defecto: el tablero es de trabajo activo.
@@ -660,6 +709,10 @@ async function cargarTrabajos() {
     trabajos.forEach(t => {
         const cancelado = t.estado === "Cancelado";
         if (cancelado && !verCancelados) return;
+
+        // Sólo llega acá si se pidió el historial completo: con el tablero
+        // normal el backend ni los manda.
+        const archivado = !!t.archivado;
 
         const cliente = clientes.find(c => c.id === t.cliente_id);
         const bordeColor = t.estado === "En Diseño" ? "var(--magenta)" : (t.estado === "En Producción" ? "var(--amber)" : "transparent");
@@ -678,24 +731,50 @@ async function cargarTrabajos() {
         const badgeCancelado = cancelado
             ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#f8d7da; color:#842029; border:1px solid var(--red, #C13B3B); padding:2px 6px; border-radius:4px;">✖ Cancelado</span></div>`
             : '';
+        // Se está viendo sólo porque está tildado "ver historial completo": sin
+        // el distintivo parecería una tarjeta más del tablero.
+        const badgeArchivado = archivado
+            ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#e9ecef; color:#495057; border:1px solid var(--muted); padding:2px 6px; border-radius:4px;">📦 Fuera del tablero</span></div>`
+            : '';
+
+        // Sacar del tablero es sólo para lo que ya terminó: un trabajo en curso
+        // que desaparece de la única pantalla donde se lo sigue es un trabajo
+        // perdido (el backend valida lo mismo).
+        const terminado = t.estado === "Entregado" || cancelado;
+        const botonArchivar = !terminado ? '' : (archivado
+            ? `<button class="btn btn-mini no-print" onclick="archivarTrabajo('${t.id}', false)">📥 Volver al tablero</button>`
+            : `<button class="btn btn-mini no-print" onclick="archivarTrabajo('${t.id}', true)">📦 Quitar del tablero</button>`);
+
+        // El reemplazo del arrastre en el celular. Va con solo-mobile porque en
+        // la PC se mueve arrastrando la tarjeta y sería un botón de más en una
+        // tarjeta que ya tiene cuatro. Un cancelado no se mueve: se reactiva.
+        const botonMover = (cancelado || archivado) ? '' :
+            `<button class="btn btn-mini no-print solo-mobile" onclick="abrirMenuMover('${t.id}')">↔️ Mover a...</button>`;
+
         // Un trabajo cancelado no se arrastra ni se reimprime: sólo se reactiva.
         const acciones = cancelado
-            ? `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>`
-            : `<button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarOrden('${t.id}')">
+            ? `<button class="btn btn-mini no-print" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>${botonArchivar}`
+            : `${botonMover}
+              <button class="btn btn-mini no-print" onclick="descargarOrden('${t.id}')">
                 ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
               </button>
-              <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="descargarRemito('${t.id}')">
+              <button class="btn btn-mini no-print" onclick="descargarRemito('${t.id}')">
                 ${t.remito_impreso ? '🖨️ Reimprimir Remito' : '🖨️ Imprimir Remito'}
               </button>
-              <button class="btn no-print" style="margin-top:8px; padding:4px 8px; font-size:11px;" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>`;
+              <button class="btn btn-mini no-print" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>${botonArchivar}`;
+
+        // El archivado tampoco se arrastra: ya no está en el tablero, y moverlo
+        // de columna sería cambiarle el estado a algo que nadie está mirando.
+        const inmovil = cancelado || archivado;
 
         const tarjetaHTML = `
-            <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" ${cancelado ? '' : `draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')"`} style="border-left: 4px solid ${bordeColor}; cursor: ${cancelado ? 'default' : 'grab'}; ${cancelado ? 'opacity:.6;' : ''}">
+            <div class="kanban-card" id="card-${t.id}" data-cliente="${t.cliente_id}" ${inmovil ? '' : `draggable="true" ondragstart="arrastrarTarjeta(event, '${t.id}')"`} style="border-left: 4px solid ${bordeColor}; cursor: ${inmovil ? 'default' : 'grab'}; ${inmovil ? 'opacity:.6;' : ''}">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
                 <span style="font-size:10px; color:var(--muted);">#${shortId}</span>
                 ${nroOrden}
               </div>
               ${badgeCancelado}
+              ${badgeArchivado}
               ${badgeSinPresu}
               <div class="client">${cliente ? esc(cliente.nombre_completo) : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${esc(t.descripcion_producto)}</div>
@@ -799,6 +878,37 @@ async function reactivarTrabajo(id) {
     } catch (error) {
         console.error('Error al reactivar el trabajo:', error);
         Swal.fire('Error de conexión', 'No se pudo reactivar el trabajo.', 'error');
+    }
+}
+
+// Saca del tablero un trabajo terminado (o lo devuelve, con archivar=false).
+// No cambia el estado ni la plata: el trabajo queda igual, sólo deja de ocupar
+// lugar en el Kanban. Los entregados salen solos a los 15 días; esto es para el
+// que se quiere sacar antes.
+async function archivarTrabajo(id, archivar) {
+    const confirmacion = await Swal.fire({
+        title: archivar ? '¿Quitar del tablero?' : '¿Volver al tablero?',
+        text: archivar
+            ? 'El trabajo no se borra ni se modifica: sale del Kanban y queda en la ficha del cliente.'
+            : 'Vuelve a verse en el tablero, si fue entregado en los últimos 15 días.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: archivar ? 'Sí, quitar' : 'Sí, volver',
+        cancelButtonText: 'No'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${id}/archivar?archivado=${archivar}`, { method: 'POST' });
+        if (!resp.ok) {
+            const error = await resp.json().catch(() => ({}));
+            Swal.fire('No se pudo hacer', detalleError(error), 'error');
+            return;
+        }
+        cargarTrabajos();
+    } catch (error) {
+        console.error('Error al archivar el trabajo:', error);
+        Swal.fire('Error de conexión', 'No se pudo actualizar el trabajo.', 'error');
     }
 }
 

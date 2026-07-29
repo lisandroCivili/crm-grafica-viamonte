@@ -203,6 +203,9 @@ function dibujarGraficoDistribucion(gastosPorCat) {
         },
         options: {
             responsive: true,
+            // El alto lo pone .chart-box en el CSS. Sin esto Chart.js conserva
+            // la proporción y en pantalla angosta el gráfico queda aplastado.
+            maintainAspectRatio: false,
             plugins: {
                 legend: { position: 'bottom', labels: { font: { size: 11 } } }
             }
@@ -261,6 +264,9 @@ function dibujarGraficoFlujo(movimientos, cheques, gastos, anio) {
         },
         options: {
             responsive: true,
+            // Ver el comentario del gráfico de distribución: el alto sale del
+            // contenedor .chart-box, no de la proporción del canvas.
+            maintainAspectRatio: false,
             scales: {
                 y: { beginAtZero: true, ticks: { callback: function(value) { return '$' + value.toLocaleString('es-AR'); } } }
             },

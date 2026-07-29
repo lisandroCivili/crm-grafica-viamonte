@@ -1,9 +1,10 @@
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import models, schemas
 from database import get_db
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from money import Q2, Q3
 from auditoria import asentar, cambios
 from calculos import calcular_saldo_trabajo
@@ -398,6 +399,7 @@ def crear_trabajo(
 def listar_trabajos(
     estado: str = None,
     sin_presupuesto: bool = False,
+    solo_tablero: bool = False,
     db: Session = Depends(get_db),
     usuario: models.Usuario = Depends(usuario_actual),
 ):
@@ -405,6 +407,24 @@ def listar_trabajos(
     # Filtro ideal para el Kanban (ej: traer solo los "En Diseño")
     if estado:
         query = query.filter(models.Trabajo.estado == estado)
+
+    # Lo que va hoy en el Kanban: todo lo que sigue vivo, más los entregados de
+    # los últimos DIAS_ENTREGADO_EN_TABLERO días. Filtra en SQL y no en Python
+    # porque el punto es justamente no traer el histórico entero a memoria.
+    #
+    # Un entregado sin fecha_entrega queda afuera: son los anteriores a que se
+    # empezara a registrarla, o sea historial viejo (la migración los archiva,
+    # ver migraciones/migracion_archivo_kanban.py).
+    if solo_tablero:
+        desde = date.today() - timedelta(days=models.DIAS_ENTREGADO_EN_TABLERO)
+        query = query.filter(
+            models.Trabajo.archivado.isnot(True),
+            or_(
+                models.Trabajo.estado != "Entregado",
+                models.Trabajo.fecha_entrega >= desde,
+            ),
+        )
+
     trabajos = query.all()
 
     # Sólo los trabajos que todavía no tienen un presupuesto asociado. Alimenta
@@ -477,7 +497,21 @@ def actualizar_trabajo(
     # MAGIA: Si el estado pasa a Diseño o Producción, clavamos la fecha de hoy
     if trabajo_update.estado in ["En Diseño", "En Producción"] and not db_trabajo.fecha_comienzo:
         db_trabajo.fecha_comienzo = date.today()
-        
+
+    # Mismo criterio para la entrega. La columna existía desde siempre pero no la
+    # escribía nadie, así que no había forma de saber hace cuánto se entregó un
+    # trabajo: es lo que necesita el Kanban para sacar del tablero los entregados
+    # viejos. No se pisa si ya tenía fecha (se puede volver a guardar Entregado).
+    if trabajo_update.estado == "Entregado" and not db_trabajo.fecha_entrega:
+        db_trabajo.fecha_entrega = date.today()
+
+    # Un trabajo que vuelve a estar vivo vuelve al tablero. Si no, reactivar uno
+    # cancelado que se había archivado lo dejaba en un limbo: en curso, pero sin
+    # tarjeta en la única pantalla donde el taller lo sigue.
+    if trabajo_update.estado in ["Aprobado", "En Diseño", "En Producción"]:
+        db_trabajo.archivado = False
+
+
     # El papel de una orden cancelada vuelve al stock si el operador lo pide.
     # Dentro de la misma transacción que el cambio de estado.
     if trabajo_update.estado == "Cancelado" and devolver_papel:
@@ -503,6 +537,55 @@ def actualizar_trabajo(
     db.commit()
     db.refresh(db_trabajo)
     return _trabajo_visible(db_trabajo, usuario)
+
+
+@router.post("/{trabajo_id}/archivar", response_model=schemas.TrabajoResponse)
+def archivar_trabajo(
+    trabajo_id: str,
+    archivado: bool = True,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
+    """Saca del Kanban un trabajo terminado (o lo devuelve, con archivado=false).
+
+    Los entregados salen solos del tablero a los DIAS_ENTREGADO_EN_TABLERO días;
+    esto es para el que se quiere sacar antes, sin esperar a que venza el plazo.
+
+    No toca el estado ni la plata: el trabajo sigue igual y sigue contando para
+    facturación. Lo único que cambia es si se ve en el tablero. Para eso está
+    esto y no una baja: eliminar_trabajo borra, y un trabajo entregado es
+    historial que no se borra.
+
+    Sólo se archiva lo que ya terminó (Entregado o Cancelado). Archivar uno en
+    producción lo haría desaparecer de la pantalla donde se lo sigue: el trabajo
+    quedaría vivo y sin nadie mirándolo.
+    """
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
+
+    if archivado and db_trabajo.estado not in ("Entregado", "Cancelado"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Sólo se puede quitar del tablero un trabajo Entregado o Cancelado "
+                f"(este está en '{db_trabajo.estado}')."
+            ),
+        )
+
+    db_trabajo.archivado = archivado
+
+    # cambios() ve el flag, pero "archivado: False -> True" no dice qué pasó:
+    # el asiento lo cuenta en castellano porque es lo que se lee en la pantalla
+    # de auditoría. Si el trabajo ya estaba así, cambios() devuelve None y no se
+    # ensucia el log con un clic repetido.
+    if cambios(db_trabajo):
+        asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
+                _resumen(db_trabajo),
+                "quitó el trabajo del tablero" if archivado else "devolvió el trabajo al tablero")
+
+    db.commit()
+    db.refresh(db_trabajo)
+    return _trabajo_visible(db_trabajo, usuario)
+
 
 @router.delete("/{trabajo_id}", dependencies=[Depends(solo_admin)])
 def eliminar_trabajo(

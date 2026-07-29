@@ -4,7 +4,7 @@ Cubren el Caso 8 (eliminar un trabajo con cheques asociados) y el Caso 6 (doble
 clic en "Imprimir orden" descontando el stock dos veces).
 """
 import threading
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -787,3 +787,185 @@ class TestAplicarSaldoFavorExtremos:
         # Y el saldo se aplicó una sola vez: exactamente una respuesta 200.
         assert respuestas.count(200) == 1, f"Se esperaba una sola aplicación exitosa: {respuestas}"
         assert _saldo_trabajo(db, nuevo) == Decimal("0")
+
+
+# --- El tablero no acumula entregados ---------------------------------------
+
+class TestTableroSinHistorico:
+    """El Kanban pedía todos los trabajos de la base: la columna "Entregado"
+    acumulaba para siempre todo lo que la gráfica entregó desde el primer día.
+    Ahora ?solo_tablero=true trae lo vivo más los entregados recientes.
+    """
+
+    def _ids_del_tablero(self, client):
+        r = client.get("/api/trabajos/?solo_tablero=true")
+        assert r.status_code == 200
+        return {t["id"] for t in r.json()}
+
+    def test_entregar_completa_la_fecha_de_entrega(self, client, db):
+        # La columna existía pero no la escribía nadie: sin esto no hay forma de
+        # saber hace cuánto se entregó, que es de lo que depende todo el filtro.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+
+        assert r.status_code == 200, r.text
+        assert r.json()["fecha_entrega"] == date.today().isoformat()
+
+    def test_no_pisa_la_fecha_de_entrega_ya_registrada(self, client, db):
+        vieja = date.today() - timedelta(days=40)
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=vieja)
+
+        client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+
+        db.refresh(trabajo)
+        assert trabajo.fecha_entrega == vieja
+
+    def test_el_entregado_reciente_sigue_en_el_tablero(self, client, db):
+        cliente = crear_cliente(db)
+        reciente = crear_trabajo(
+            db, cliente, estado="Entregado",
+            fecha_entrega=date.today() - timedelta(days=models.DIAS_ENTREGADO_EN_TABLERO - 1),
+        )
+
+        assert reciente.id in self._ids_del_tablero(client)
+
+    def test_el_entregado_viejo_sale_del_tablero(self, client, db):
+        cliente = crear_cliente(db)
+        viejo = crear_trabajo(
+            db, cliente, estado="Entregado",
+            fecha_entrega=date.today() - timedelta(days=models.DIAS_ENTREGADO_EN_TABLERO + 1),
+        )
+
+        assert viejo.id not in self._ids_del_tablero(client)
+        # Pero no se borró: sigue en el listado completo, que es el que alimenta
+        # la ficha del cliente.
+        assert viejo.id in {t["id"] for t in client.get("/api/trabajos/").json()}
+
+    def test_los_trabajos_en_curso_nunca_se_filtran(self, client, db):
+        # Sea cual sea su antigüedad: lo que no está entregado se sigue.
+        cliente = crear_cliente(db)
+        viejo_en_curso = crear_trabajo(
+            db, cliente, estado="En Producción",
+            fecha_creacion=date.today() - timedelta(days=365),
+        )
+
+        assert viejo_en_curso.id in self._ids_del_tablero(client)
+
+    def test_sin_el_filtro_el_listado_sigue_trayendo_todo(self, client, db):
+        # No romper el endpoint: la ficha del cliente y el selector de
+        # presupuestos lo llaman sin parámetros y necesitan el historial entero.
+        cliente = crear_cliente(db)
+        viejo = crear_trabajo(
+            db, cliente, estado="Entregado",
+            fecha_entrega=date.today() - timedelta(days=200),
+        )
+
+        assert viejo.id in {t["id"] for t in client.get("/api/trabajos/").json()}
+
+
+class TestArchivarTrabajo:
+    """El botón "Quitar del tablero": saca un entregado antes de que venza el
+    plazo, sin borrarlo ni cambiarle el estado.
+    """
+
+    def test_archivar_lo_saca_del_tablero(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=date.today())
+
+        r = client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["archivado"] is True
+        ids = {t["id"] for t in client.get("/api/trabajos/?solo_tablero=true").json()}
+        assert trabajo.id not in ids
+
+    def test_archivar_no_toca_el_estado_ni_el_precio(self, client, db):
+        # Es una acción de tablero, no de negocio: el trabajo sigue contando
+        # para facturación exactamente igual.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=date.today())
+
+        client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        db.refresh(trabajo)
+        assert trabajo.estado == "Entregado"
+        assert trabajo.precio_venta == Decimal("50000")
+
+    def test_desarchivar_lo_devuelve_al_tablero(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(
+            db, cliente, estado="Entregado", fecha_entrega=date.today(), archivado=True,
+        )
+
+        r = client.post(f"/api/trabajos/{trabajo.id}/archivar?archivado=false")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["archivado"] is False
+        ids = {t["id"] for t in client.get("/api/trabajos/?solo_tablero=true").json()}
+        assert trabajo.id in ids
+
+    def test_no_se_puede_archivar_un_trabajo_en_curso(self, client, db):
+        # Lo importante: un trabajo vivo no puede desaparecer de la única
+        # pantalla donde el taller lo sigue.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="En Producción")
+
+        r = client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        assert r.status_code == 400
+        assert "Entregado o Cancelado" in r.json()["detail"]
+        db.refresh(trabajo)
+        assert trabajo.archivado is not True
+
+    def test_un_cancelado_se_puede_archivar(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Cancelado")
+
+        r = client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["archivado"] is True
+
+    def test_reactivar_un_archivado_lo_devuelve_al_tablero(self, client, db):
+        # Si no, quedaba en limbo: en curso, pero sin tarjeta en el Kanban.
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Cancelado", archivado=True)
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Aprobado"})
+
+        assert r.status_code == 200, r.text
+        assert r.json()["archivado"] is False
+        ids = {t["id"] for t in client.get("/api/trabajos/?solo_tablero=true").json()}
+        assert trabajo.id in ids
+
+    def test_archivar_deja_asiento_en_auditoria(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=date.today())
+
+        client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        asiento = (
+            db.query(models.Auditoria)
+            .filter(models.Auditoria.entidad_id == trabajo.id)
+            .order_by(models.Auditoria.id.desc())
+            .first()
+        )
+        assert asiento is not None, "Quitar del tablero tiene que quedar registrado"
+        assert "tablero" in asiento.detalle
+
+    def test_archivar_dos_veces_no_duplica_el_asiento(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=date.today())
+
+        client.post(f"/api/trabajos/{trabajo.id}/archivar")
+        client.post(f"/api/trabajos/{trabajo.id}/archivar")
+
+        asientos = (
+            db.query(models.Auditoria)
+            .filter(models.Auditoria.entidad_id == trabajo.id)
+            .count()
+        )
+        assert asientos == 1, "Un clic repetido no cambia nada: no tiene que ensuciar el log"

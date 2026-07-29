@@ -9,6 +9,13 @@ from money import Money, Cantidad
 # valida contra esta lista y el frontend arma el Kanban con estos mismos nombres.
 ESTADOS_TRABAJO = ["Aprobado", "En Diseño", "En Producción", "Entregado", "Cancelado"]
 
+# Cuántos días sigue viéndose en el Kanban un trabajo ya entregado. Pasado ese
+# plazo sale del tablero (no se borra: queda en la ficha del cliente). Sin este
+# corte la columna "Entregado" acumularía para siempre todo lo que la gráfica
+# entregó desde el día uno. Única fuente de verdad: el filtro del listado y el
+# texto de la columna salen de acá.
+DIAS_ENTREGADO_EN_TABLERO = 15
+
 # Estados por los que puede pasar un Cheque. Mismo criterio que ESTADOS_TRABAJO:
 # única fuente de verdad, validada desde el schema para que un estado inventado
 # no llegue nunca a la base. Las transiciones válidas entre ellos las define
@@ -104,6 +111,15 @@ class Trabajo(Base):
     remito_impreso = Column(Boolean, default=False)
     numero_remito = Column(String, index=True, nullable=True)
     fecha_remito_impreso = Column(DateTime, nullable=True)
+
+    # --- Visibilidad en el Kanban ---
+    # El tablero muestra los entregados de los últimos DIAS_ENTREGADO_EN_TABLERO días: sin
+    # eso, a los pocos meses la columna "Entregado" acumula todo lo que pasó por
+    # la gráfica y deja de servir para trabajar. Este flag es la salida manual
+    # para el que ya se entregó y no se quiere seguir viendo (se archiva antes de
+    # que venza la ventana). No borra ni cambia nada del trabajo: sólo lo saca
+    # del tablero. Sigue entero en la ficha de su cliente.
+    archivado = Column(Boolean, default=False)
 
     cliente = relationship("Cliente", back_populates="trabajos")
     notas = relationship("Nota", back_populates="trabajo")
