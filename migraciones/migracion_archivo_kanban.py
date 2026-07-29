@@ -40,6 +40,11 @@ y lo restaura. De acá en adelante fecha_entrega se completa sola al entregar.
 Es IDEMPOTENTE: se puede correr dos veces sin romper nada. La segunda corrida no
 vuelve a archivar nada, porque sólo toca las filas que quedaron en 0.
 
+NOTA: en el servidor (Railway) esto ya no hace falta correrlo a mano. La misma
+columna se agrega sola al arrancar el backend (ver arranque.py,
+aplicar_migraciones_pendientes) porque ahí no hay consola. Este script sigue
+sirviendo para la compu del taller o para forzarla manualmente si hiciera falta.
+
 CÓMO CORRERLO (desde la raíz del proyecto, con el backend apagado):
     python -m migraciones.migracion_archivo_kanban
 """

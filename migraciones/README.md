@@ -32,6 +32,7 @@ son idempotentes salvo donde se aclare: correrlos dos veces no rompe.
 | 6 | `migracion_cheques_v2` | 2026-07-20 | Clasificación de cheques y tabla `historial_cheques`. |
 | 7 | `migracion_devolucion_papel` | 2026-07-20 | `trabajos.papel_devuelto`, para el reingreso de pliegos al cancelar. |
 | 8 | `migracion_papel_presupuesto` | 2026-07-21 | El papel viaja del presupuesto al trabajo (`papel_id`, `cantidad_pliegos`). |
+| 9 | `migracion_archivo_kanban` | 2026-07-29 | `trabajos.archivado`, para sacar del tablero el histórico de entregados. Desde este script en adelante, la columna se agrega sola al arrancar el backend (ver nota de Railway abajo) — correrlo a mano ya es opcional. |
 
 Las cuatro del 2026-07-17 entraron en el mismo commit; entre ellas el orden es
 indistinto (tocan tablas distintas).
@@ -49,3 +50,21 @@ El `dirname()` de más no es decorativo. Sin él, `DB_PATH` apunta a
 `migraciones/viamonte.db`, que no existe, y el script sale diciendo *"No existe
 viamonte.db, nada para migrar"* sin haber tocado la base real — falla en silencio
 aparentando que funcionó.
+
+## Nota sobre Railway
+
+Ese mismo `BASE_DIR` (la carpeta del proyecto) **no es** dónde vive `viamonte.db`
+en Railway: ahí la base está en el volumen montado (`RAILWAY_VOLUME_MOUNT_PATH`,
+resuelto en `rutas.py` como `DIR_DATOS`), no en el checkout del repo. Correr uno
+de estos scripts a mano desde una shell de Railway (`railway ssh`) apuntaría al
+lugar equivocado y saldría diciendo "nada para migrar" sin haber tocado la base
+real — el mismo fallo silencioso que el párrafo anterior, pero cruzando encima
+de carpeta.
+
+Por eso, desde `migracion_archivo_kanban` en adelante, los cambios de esquema
+que hacen falta en producción se agregan también en `arranque.py`
+(`aplicar_migraciones_pendientes`), que sí usa la conexión real de la app
+(`database.engine`) y corre solo en cada arranque del backend, en Railway y en
+la compu del taller por igual. Los scripts acá siguen siendo la referencia para
+entender qué cambió y por qué, y sirven para forzar el cambio a mano en la
+compu del taller si hiciera falta.

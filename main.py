@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from arranque import sembrar_usuarios_iniciales
+from arranque import aplicar_migraciones_pendientes, sembrar_usuarios_iniciales
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
 from seguridad import solo_admin, usuario_actual
@@ -15,6 +15,12 @@ from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, mo
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
+
+# Una base que ya tenía datos antes de una columna nueva no la recibe sola con
+# create_all() (ver arranque.py): sin esto, cualquier deploy que sume una
+# columna deja la base de Railway desincronizada y tirando 500 hasta que
+# alguien corra la migración a mano.
+aplicar_migraciones_pendientes()
 
 # En el servidor la base nace vacía y no hay consola para correr el script que
 # da de alta a los usuarios: sin esto, el sistema queda deployado y nadie puede

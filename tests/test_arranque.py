@@ -1,13 +1,17 @@
-"""Tests del alta automática de usuarios al arrancar.
+"""Tests del alta automática de usuarios y de migraciones de esquema al arrancar.
 
 Es lo único que separa un deploy funcionando de uno con la puerta cerrada para
-todos: en el servidor la base nace vacía y no hay consola donde correr el script
-que da de alta a la gente.
+todos, o tirando 500 en cualquier pantalla que toque una columna nueva: en el
+servidor la base nace vacía o ya viene con datos reales de antes, y no hay
+consola donde correr a mano ni el alta de usuarios ni los ALTER TABLE de
+migraciones/.
 """
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 import models
-from arranque import _sembrar
+from arranque import _migrar_columna_archivado, _sembrar
 from conftest import crear_usuario
 from seguridad import verificar_password
 
@@ -76,3 +80,77 @@ def test_crea_solo_los_que_tienen_variable_definida(db, sin_claves, monkeypatch)
 
     assert _sembrar(db) == ["lucio"]
     assert db.query(models.Usuario).count() == 1
+
+
+# --- Migración de trabajos.archivado ----------------------------------------
+#
+# Estos tests no usan el fixture `db` de conftest.py: ese arma la base con
+# Base.metadata.create_all(), que ya incluye 'archivado' porque está en
+# models.py. Para probar el caso real (una base de Railway de antes de esta
+# columna) hay que armar a mano una tabla 'trabajos' vieja, sin ella.
+
+def _sesion_con_esquema_viejo(tmp_path):
+    """Una base con 'trabajos' tal como quedaba antes de sumar 'archivado'."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'vieja.db'}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            """
+            CREATE TABLE trabajos (
+                id TEXT PRIMARY KEY,
+                cliente_id TEXT NOT NULL,
+                descripcion_producto TEXT NOT NULL,
+                cantidad INTEGER NOT NULL,
+                estado TEXT,
+                fecha_creacion DATE NOT NULL,
+                precio_venta TEXT NOT NULL,
+                costo_total_materiales TEXT NOT NULL
+            )
+            """
+        ))
+    return sessionmaker(bind=engine)()
+
+
+def test_agrega_archivado_si_la_base_no_la_tiene(tmp_path):
+    """El caso real: una base de Railway deployada antes de esta columna."""
+    db = _sesion_con_esquema_viejo(tmp_path)
+    db.execute(text(
+        "INSERT INTO trabajos VALUES "
+        "('t1', 'c1', 'Tarjetas', 100, 'Entregado', '2026-01-01', '1000.00', '500.00')"
+    ))
+    db.execute(text(
+        "INSERT INTO trabajos VALUES "
+        "('t2', 'c1', 'Folletos', 200, 'En Producción', '2026-01-01', '2000.00', '900.00')"
+    ))
+    db.commit()
+
+    _migrar_columna_archivado(db)
+
+    columnas = {fila[1] for fila in db.execute(text("PRAGMA table_info(trabajos)"))}
+    assert "archivado" in columnas
+
+    # El ya entregado sale del tablero; el que sigue en curso, no se toca.
+    archivado_por_id = dict(db.execute(text("SELECT id, archivado FROM trabajos")).all())
+    assert archivado_por_id == {"t1": 1, "t2": 0}
+
+
+def test_correr_la_migracion_dos_veces_no_rompe_ni_repite(tmp_path):
+    """El servidor reinicia el proceso todo el tiempo: el segundo arranque no
+    puede fallar por 'la columna ya existe' ni volver a archivar nada."""
+    db = _sesion_con_esquema_viejo(tmp_path)
+    db.execute(text(
+        "INSERT INTO trabajos VALUES "
+        "('t1', 'c1', 'Tarjetas', 100, 'Entregado', '2026-01-01', '1000.00', '500.00')"
+    ))
+    db.commit()
+
+    _migrar_columna_archivado(db)
+    _migrar_columna_archivado(db)  # no debe lanzar
+
+    fila = db.execute(text("SELECT archivado FROM trabajos WHERE id = 't1'")).first()
+    assert fila[0] == 1
+
+
+def test_si_la_columna_ya_existe_no_hace_nada(db):
+    """Contra la base normal de tests, que ya nace con 'archivado' (modelo
+    actual): no tiene que fallar ni re-archivar nada."""
+    _migrar_columna_archivado(db)  # no debe lanzar
