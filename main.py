@@ -11,7 +11,7 @@ from database import engine, BASE_DIR
 from rutas import ruta_recurso
 from seguridad import solo_admin, usuario_actual
 # Importamos todos los routers modulares que creamos
-from routers import clientes, trabajos, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes, empleados, asistencia, auditoria
+from routers import clientes, trabajos, entregas, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes, empleados, asistencia, auditoria
 
 # Creamos las tablas físicamente en el archivo 'viamonte.db' al iniciar si no existen
 models.Base.metadata.create_all(bind=engine)
@@ -66,6 +66,7 @@ app.add_middleware(
 app.include_router(clientes.router)
 app.include_router(presupuestos.router)
 app.include_router(trabajos.router)
+app.include_router(entregas.router)
 app.include_router(stock.router)
 app.include_router(gastos.router)
 app.include_router(cheques.router)

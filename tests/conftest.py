@@ -10,7 +10,7 @@ database.py está atado a SU engine, así que un engine nuevo nace con las FK
 desactivadas y los tests dejarían de ver los errores de integridad que sí
 ocurren en producción.
 """
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
 import pytest
@@ -129,6 +129,42 @@ def crear_trabajo(db, cliente, **overrides):
     db.commit()
     db.refresh(trabajo)
     return trabajo
+
+
+def crear_entrega(db, trabajo, cliente=None, **overrides):
+    """Crea un remito (Entrega) de un solo ítem para ese trabajo y devuelve el
+    ItemEntrega (tiene .cantidad, .numero_remito/.fecha por propiedad,
+    .entrega_id para reimprimir). cliente por defecto es el del propio
+    trabajo; pasalo distinto sólo para simular datos inconsistentes a propósito.
+    """
+    cantidad = overrides.pop("cantidad", trabajo.cantidad)
+    numero_remito = overrides.pop("numero_remito", "RE-000001")
+    fecha = overrides.pop("fecha", datetime.now(timezone.utc))
+
+    entrega = models.Entrega(
+        cliente_id=(cliente.id if cliente else trabajo.cliente_id),
+        numero_remito=numero_remito,
+        fecha=fecha,
+    )
+    db.add(entrega)
+    db.commit()
+    db.refresh(entrega)
+
+    item = models.ItemEntrega(entrega_id=entrega.id, trabajo_id=trabajo.id, cantidad=cantidad, **overrides)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def agregar_item_entrega(db, entrega, trabajo, cantidad):
+    """Agrega otro renglón a un remito ya creado (para armar en el test un
+    remito combinado con varios trabajos)."""
+    item = models.ItemEntrega(entrega_id=entrega.id, trabajo_id=trabajo.id, cantidad=cantidad)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 def crear_papel(db, **overrides):

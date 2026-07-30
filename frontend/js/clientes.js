@@ -171,6 +171,108 @@ async function aplicarSaldoFavor(id) {
     }
 }
 
+// Arma un remito que puede combinar varios trabajos del mismo cliente (ej: el
+// cliente retira parte de dos pedidos distintos en la misma visita). El botón
+// "🖨️ Registrar entrega" de la tarjeta del Kanban (trabajos.js) sigue
+// sirviendo para el caso simple de un solo trabajo, y pega al mismo endpoint
+// por debajo con un solo ítem.
+async function abrirNuevaEntrega(clienteId) {
+    if (!clienteId) return;
+
+    const todosTrabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
+    const pendientes = todosTrabajos.filter(t =>
+        t.cliente_id === clienteId && t.estado !== 'Cancelado' &&
+        (t.cantidad - (t.cantidad_entregada || 0)) > 0
+    );
+
+    if (pendientes.length === 0) {
+        Swal.fire('Nada para entregar', 'Este cliente no tiene trabajos con saldo pendiente de entrega.', 'info');
+        return;
+    }
+
+    const filasHtml = pendientes.map(t => {
+        const pendiente = t.cantidad - (t.cantidad_entregada || 0);
+        return `
+            <div style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #eee;">
+                <input type="checkbox" class="chk-entrega-trabajo" data-trabajo-id="${t.id}">
+                <span style="flex:1; font-size:13px;">${esc(t.descripcion_producto)} <small style="color:var(--muted);">(pendiente: ${pendiente}/${t.cantidad})</small></span>
+                <input type="number" class="swal2-input inp-cant-entrega" data-trabajo-id="${t.id}" min="1" step="1" max="${pendiente}" value="${pendiente}" style="width:70px; margin:0; padding:4px;" disabled>
+            </div>
+        `;
+    }).join('');
+
+    const { value: items } = await Swal.fire({
+        title: 'Nueva entrega',
+        html: `<div style="text-align:left; max-height:320px; overflow-y:auto;">${filasHtml}</div>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Emitir remito',
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            // El input de cantidad sólo se habilita para lo que se tilda: un
+            // trabajo sin tildar no debería poder mandar cantidad igual.
+            document.querySelectorAll('.chk-entrega-trabajo').forEach(chk => {
+                chk.addEventListener('change', () => {
+                    document.querySelector(`.inp-cant-entrega[data-trabajo-id="${chk.dataset.trabajoId}"]`).disabled = !chk.checked;
+                });
+            });
+        },
+        preConfirm: () => {
+            const items = [];
+            let error = null;
+            document.querySelectorAll('.chk-entrega-trabajo:checked').forEach(chk => {
+                const trabajoId = chk.dataset.trabajoId;
+                const cantidad = parseInt(document.querySelector(`.inp-cant-entrega[data-trabajo-id="${trabajoId}"]`).value);
+                if (!cantidad || cantidad <= 0) error = 'Ingresá una cantidad válida para cada trabajo tildado.';
+                items.push({ trabajo_id: trabajoId, cantidad });
+            });
+            if (error) { Swal.showValidationMessage(error); return false; }
+            if (items.length === 0) { Swal.showValidationMessage('Tildá al menos un trabajo.'); return false; }
+            return items;
+        }
+    });
+
+    if (items) {
+        await confirmarNuevaEntrega(clienteId, items);
+    }
+}
+
+// Registra el remito combinado armado en abrirNuevaEntrega. Mismo patrón de
+// reintento con forzar que registrarEntrega en trabajos.js (el caso simple de
+// un solo ítem): mismo endpoint, una lista más larga.
+async function confirmarNuevaEntrega(clienteId, items, forzar = false) {
+    try {
+        const url = `${API_URL}/entregas${forzar ? '?forzar=true' : ''}`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cliente_id: clienteId, items })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            if (resp.status === 400 && !forzar) {
+                const r = await Swal.fire({
+                    title: 'Supera el saldo pendiente',
+                    text: detalleError(err, '') + ' ¿Registrar igual?',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Registrar igual',
+                    cancelButtonText: 'Cancelar'
+                });
+                if (r.isConfirmed) return confirmarNuevaEntrega(clienteId, items, true);
+                return;
+            }
+            throw new Error(detalleError(err, "No se pudo registrar la entrega."));
+        }
+
+        _descargarBlobPdf(await resp.blob(), `remito_${clienteId.substring(0,6).toUpperCase()}.pdf`);
+        refrescarTablero();
+    } catch (error) {
+        Swal.fire('No se pudo registrar la entrega', error.message, 'error');
+    }
+}
+
 // ==========================================
 // CARGA DE TABLAS Y LISTADO DE CLIENTES
 // ==========================================

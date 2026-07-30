@@ -9,8 +9,9 @@ from money import Q2, Q3
 from auditoria import asentar, cambios
 from calculos import calcular_saldo_trabajo
 from papel import buscar_papel, validar_papel
-from pdf import construir_orden_pdf, construir_entrega_pdf
+from pdf import construir_orden_pdf
 from routers._comun import obtener_o_404
+from trabajos_comun import resumen_trabajo, saldo_pendiente_entrega
 from seguridad import (
     ROL_ADMIN,
     TODOS_LOS_ROLES,
@@ -35,18 +36,6 @@ CAMPOS_DE_PLATA = ("precio_venta", "costo_total_materiales")
 # Cómo se llama esta entidad en el registro de auditoría. Constante para que el
 # filtro de la pantalla y lo que se guarda no se puedan despegar por un typo.
 ENTIDAD = "Trabajo"
-
-
-def _resumen(trabajo: models.Trabajo) -> str:
-    """Cómo se nombra este trabajo en el registro de auditoría.
-
-    Por el número de orden cuando ya se imprimió, que es como lo llaman en el
-    taller; hasta entonces, por lo que es. El cliente va siempre: en una lista de
-    cambios "Volantes A5" sin apellido no alcanza para saber cuál era.
-    """
-    quien = trabajo.cliente.nombre_completo if trabajo.cliente else "sin cliente"
-    que = trabajo.numero_orden or f"{trabajo.cantidad}x {trabajo.descripcion_producto}"
-    return f"{que} ({quien})"
 
 
 def _trabajo_visible(trabajo: models.Trabajo, usuario: models.Usuario) -> schemas.TrabajoResponse:
@@ -91,31 +80,7 @@ def _generar_numero_orden(db: Session) -> str:
     return "OP-000001"
 
 
-def _generar_numero_remito(db: Session) -> str:
-    """Número correlativo del remito: RE-000001, RE-000002...
-
-    Mismo criterio que _generar_numero_orden, con prefijo propio para no
-    confundir un remito con una orden de producción o un presupuesto.
-    """
-    ultimo = (
-        db.query(models.Trabajo)
-        .filter(models.Trabajo.numero_remito.isnot(None))
-        .order_by(models.Trabajo.numero_remito.desc())
-        .first()
-    )
-
-    if not ultimo or not ultimo.numero_remito:
-        return "RE-000001"
-
-    partes = ultimo.numero_remito.split("-")
-    if len(partes) == 2:
-        nuevo_numero = str(int(partes[1]) + 1).zfill(6)
-        return f"RE-{nuevo_numero}"
-
-    return "RE-000001"
-
-
-def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str):
+def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str, forzar: bool = False):
     """Reglas de flujo de la orden. Lanza HTTPException si la transición no va."""
     if nuevo_estado not in models.ESTADOS_TRABAJO:
         raise HTTPException(
@@ -137,6 +102,20 @@ def _validar_cambio_estado(db_trabajo: models.Trabajo, nuevo_estado: str):
             status_code=400,
             detail="Imprimí la orden de producción antes de mandar el trabajo a producción.",
         )
+
+    # Avisa (no bloquea) si todavía queda mercadería sin entregar: el flujo
+    # normal es completar las entregas parciales antes de cerrar el trabajo,
+    # pero puede haber excepciones (el cliente no retira el resto, etc.).
+    if nuevo_estado == "Entregado" and not forzar:
+        pendiente = saldo_pendiente_entrega(db_trabajo)
+        if pendiente > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Quedan {pendiente} de {db_trabajo.cantidad} unidades sin entregar. "
+                    "¿Marcarlo Entregado igual?"
+                ),
+            )
 
 
 def _descontar_papel(db: Session, db_trabajo: models.Trabajo, numero_orden: str, forzar: bool):
@@ -390,7 +369,7 @@ def crear_trabajo(
     nuevo_trabajo = models.Trabajo(**trabajo.model_dump())
     db.add(nuevo_trabajo)
     db.flush()  # necesitamos el id para el asiento de auditoría
-    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_trabajo.id, _resumen(nuevo_trabajo))
+    asentar(db, usuario, models.ACCION_ALTA, ENTIDAD, nuevo_trabajo.id, resumen_trabajo(nuevo_trabajo))
     db.commit()
     db.refresh(nuevo_trabajo)
     return nuevo_trabajo
@@ -445,15 +424,18 @@ def actualizar_trabajo(
     trabajo_id: str,
     trabajo_update: schemas.TrabajoUpdate,
     devolver_papel: bool = False,
+    forzar: bool = False,
     db: Session = Depends(get_db),
     usuario: models.Usuario = Depends(usuario_actual),
 ):
     """Actualiza un trabajo.
 
     devolver_papel sólo tiene efecto al pasar a 'Cancelado': reingresa al stock
-    los pliegos que había descontado la orden impresa. Va por query param (y no
-    en el schema) por el mismo criterio que 'forzar' en imprimir-orden: es una
-    decisión del operador en el momento, no un dato del trabajo.
+    los pliegos que había descontado la orden impresa. forzar permite marcar
+    'Entregado' aunque quede saldo de mercadería sin entregar. Ambos van por
+    query param (y no en el schema) por el mismo criterio que 'forzar' en
+    imprimir-orden: es una decisión del operador en el momento, no un dato del
+    trabajo.
     """
     db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
 
@@ -469,7 +451,7 @@ def actualizar_trabajo(
             update_data.pop(campo, None)
 
     if trabajo_update.estado:
-        _validar_cambio_estado(db_trabajo, trabajo_update.estado)
+        _validar_cambio_estado(db_trabajo, trabajo_update.estado, forzar)
 
     # La orden ya impresa descontó stock contra estos valores: si cambiaran, el
     # descuento quedaría mintiendo. Mismo criterio que un presupuesto convertido.
@@ -532,7 +514,7 @@ def actualizar_trabajo(
     detalle = cambios(db_trabajo)
     if detalle:
         asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
-                _resumen(db_trabajo), detalle)
+                resumen_trabajo(db_trabajo), detalle)
 
     db.commit()
     db.refresh(db_trabajo)
@@ -579,7 +561,7 @@ def archivar_trabajo(
     # ensucia el log con un clic repetido.
     if cambios(db_trabajo):
         asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
-                _resumen(db_trabajo),
+                resumen_trabajo(db_trabajo),
                 "quitó el trabajo del tablero" if archivado else "devolvió el trabajo al tablero")
 
     db.commit()
@@ -615,9 +597,16 @@ def eliminar_trabajo(
     if tiene_cheques:
         raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene cheques imputados. Cancelalo en su lugar.")
 
+    # Mismo caso que cheques: ItemEntrega apunta al trabajo por FK y un remito
+    # ya emitido es un comprobante entregado en mano, no algo que se pueda
+    # deshacer borrando el trabajo.
+    tiene_entregas = db.query(models.ItemEntrega).filter(models.ItemEntrega.trabajo_id == trabajo_id).first()
+    if tiene_entregas:
+        raise HTTPException(status_code=400, detail="No se puede eliminar: el trabajo tiene remitos de entrega emitidos. Cancelalo en su lugar.")
+
     # El resumen se arma ANTES del delete, con el objeto todavía cargado: es el
     # único rastro que va a quedar de este trabajo.
-    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_trabajo.id, _resumen(db_trabajo))
+    asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_trabajo.id, resumen_trabajo(db_trabajo))
 
     db.query(models.Nota).filter(models.Nota.trabajo_id == trabajo_id).update({"trabajo_id": None})
     db.delete(db_trabajo)
@@ -703,7 +692,7 @@ def iniciar_diseno(
         cobrado = f"sin seña: {datos.motivo.strip()}"
     detalle = "; ".join(parte for parte in (cambios(db_trabajo), cobrado) if parte)
     asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id,
-            _resumen(db_trabajo), detalle)
+            resumen_trabajo(db_trabajo), detalle)
 
     db.commit()
     db.refresh(db_trabajo)
@@ -738,7 +727,7 @@ def aplicar_saldo_favor(
     # Lo que cambió acá no es el trabajo sino a qué trabajo está imputada plata
     # que ya existía: cambios(db_trabajo) no ve nada, y sin este asiento la
     # re-imputación sería el movimiento de plata más silencioso del sistema.
-    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id, _resumen(db_trabajo),
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, db_trabajo.id, resumen_trabajo(db_trabajo),
             f"aplicó $ {monto_aplicado} de saldo a favor del cliente; "
             f"queda pendiente $ {saldo_pendiente_restante}")
 
@@ -805,7 +794,7 @@ def imprimir_orden(
             if forzar:
                 detalle += " (forzada: el papel no alcanzaba)"
             asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id,
-                    _resumen(db_trabajo), detalle)
+                    resumen_trabajo(db_trabajo), detalle)
 
             db.commit()
         else:
@@ -821,52 +810,3 @@ def imprimir_orden(
     )
 
 
-@router.post("/{trabajo_id}/orden-entrega")
-def orden_entrega(
-    trabajo_id: str,
-    db: Session = Depends(get_db),
-    usuario: models.Usuario = Depends(usuario_actual),
-):
-    """Emite el remito (orden de entrega) en PDF.
-
-    Es POST y no GET porque, igual que imprimir_orden, tiene un efecto
-    colateral: numero_remito se asigna la primera vez (reclamo idempotente vía
-    UPDATE condicional, mismo mecanismo que la orden de producción) y
-    reimprimir sólo regenera el PDF con el mismo número. A diferencia de la
-    orden de producción, el remito no descuenta stock.
-    """
-    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
-
-    if not db_trabajo.remito_impreso:
-        numero_remito = _generar_numero_remito(db)
-
-        reclamado = (
-            db.query(models.Trabajo)
-            .filter(models.Trabajo.id == trabajo_id, models.Trabajo.remito_impreso.isnot(True))
-            .update(
-                {
-                    "remito_impreso": True,
-                    "numero_remito": numero_remito,
-                    "fecha_remito_impreso": datetime.now(timezone.utc),
-                },
-                synchronize_session=False,
-            )
-        )
-
-        if reclamado:
-            # Mismo caso que imprimir_orden: el UPDATE fue por query, cambios()
-            # no lo ve. Sólo la primera emisión, que es la que asigna el número.
-            asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id,
-                    _resumen(db_trabajo), f"remito {numero_remito} emitido")
-            db.commit()
-        else:
-            # Perdimos la carrera: el otro request ya lo imprimió.
-            db.rollback()
-        db.refresh(db_trabajo)
-
-    pdf = construir_entrega_pdf(db_trabajo, db_trabajo.cliente)
-    return Response(
-        content=pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="remito_{db_trabajo.numero_remito}.pdf"'},
-    )

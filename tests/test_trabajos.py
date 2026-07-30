@@ -11,7 +11,7 @@ import pytest
 
 import models
 from calculos import calcular_saldo_cliente, ingresos_reales
-from conftest import crear_cheque, crear_cliente, crear_papel, crear_trabajo
+from conftest import crear_cheque, crear_cliente, crear_entrega, crear_papel, crear_trabajo
 
 
 def crear_pago(db, cliente, trabajo=None, monto=Decimal("500"), **overrides):
@@ -350,6 +350,42 @@ class TestImprimirOrden:
         ).first()
         assert papel_final.cantidad == Decimal("400.000")
         assert respuestas.count(200) >= 1, f"Ninguna impresión salió bien: {respuestas}"
+
+
+# --- Saldo pendiente de entrega vs. cambio de estado ------------------------
+# La creación/reimpresión de remitos vive en routers/entregas.py y sus tests
+# en tests/test_entregas.py; esto es sólo la validación que sigue viviendo en
+# el PUT de este router (_validar_cambio_estado).
+
+class TestValidacionEntregaAlCambiarEstado:
+
+    def test_mover_a_entregado_con_saldo_pendiente_avisa(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, cantidad=100)
+        crear_entrega(db, trabajo, cantidad=60, numero_remito="RE-000001")
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+
+        assert r.status_code == 400
+        assert "40" in r.json()["detail"]
+
+    def test_forzar_permite_marcar_entregado_con_saldo_pendiente(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, cantidad=100)
+        crear_entrega(db, trabajo, cantidad=60, numero_remito="RE-000001")
+
+        r = client.put(f"/api/trabajos/{trabajo.id}?forzar=true", json={"estado": "Entregado"})
+
+        assert r.status_code == 200, r.text
+
+    def test_mover_a_entregado_con_saldo_completo_no_requiere_forzar(self, client, db):
+        cliente = crear_cliente(db)
+        trabajo = crear_trabajo(db, cliente, cantidad=100)
+        crear_entrega(db, trabajo, cantidad=100, numero_remito="RE-000001")
+
+        r = client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+
+        assert r.status_code == 200, r.text
 
 
 # --- Datos de producción al pasar a En Producción ---------------------------
@@ -805,10 +841,13 @@ class TestTableroSinHistorico:
     def test_entregar_completa_la_fecha_de_entrega(self, client, db):
         # La columna existía pero no la escribía nadie: sin esto no hay forma de
         # saber hace cuánto se entregó, que es de lo que depende todo el filtro.
+        # forzar=true porque el trabajo no tiene ninguna entrega parcial
+        # registrada: sin eso, el saldo pendiente (toda la cantidad) bloquea el
+        # pase a Entregado con un 400 (ver TestEntregas).
         cliente = crear_cliente(db)
         trabajo = crear_trabajo(db, cliente)
 
-        r = client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+        r = client.put(f"/api/trabajos/{trabajo.id}?forzar=true", json={"estado": "Entregado"})
 
         assert r.status_code == 200, r.text
         assert r.json()["fecha_entrega"] == date.today().isoformat()
@@ -818,8 +857,12 @@ class TestTableroSinHistorico:
         cliente = crear_cliente(db)
         trabajo = crear_trabajo(db, cliente, estado="Entregado", fecha_entrega=vieja)
 
-        client.put(f"/api/trabajos/{trabajo.id}", json={"estado": "Entregado"})
+        # forzar=true: el trabajo no tiene entregas parciales registradas, así
+        # que sin esto el 400 de saldo pendiente cortaría antes de llegar al
+        # código que este test quiere ejercitar.
+        r = client.put(f"/api/trabajos/{trabajo.id}?forzar=true", json={"estado": "Entregado"})
 
+        assert r.status_code == 200, r.text
         db.refresh(trabajo)
         assert trabajo.fecha_entrega == vieja
 

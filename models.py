@@ -106,8 +106,13 @@ class Trabajo(Base):
     papel_devuelto = Column(Boolean, default=False)
 
     # --- Emisión del remito (orden de entrega) ---
-    # Mismo criterio que orden_impresa/numero_orden: el número se asigna recién
-    # al imprimir, y reimprimir sólo regenera el PDF sin pisar el número.
+    # LEGACY / CONGELADO: asumía un solo remito por trabajo. Reemplazado por la
+    # relación entregas (ver clase Entrega más abajo), que admite varias
+    # entregas parciales, cada una con su propio remito. Ya no los escribe
+    # ningún endpoint ni los expone TrabajoResponse; se conservan sin tocar
+    # porque trabajos tiene FKs entrantes (movimientos, notas, cheques, gastos,
+    # items_presupuesto) y recrear la tabla es un riesgo innecesario. Los datos
+    # que ya tenían quedaron migrados a Entrega (ver migraciones/).
     remito_impreso = Column(Boolean, default=False)
     numero_remito = Column(String, index=True, nullable=True)
     fecha_remito_impreso = Column(DateTime, nullable=True)
@@ -124,6 +129,69 @@ class Trabajo(Base):
     cliente = relationship("Cliente", back_populates="trabajos")
     notas = relationship("Nota", back_populates="trabajo")
     papel = relationship("ArticuloStock")
+    # Cada fila es UN renglón de UN remito que incluyó a este trabajo (ver
+    # ItemEntrega). Un remito puede combinar varios trabajos del mismo
+    # cliente, así que esto NO es "los remitos de este trabajo": es "en qué
+    # remitos, y con qué cantidad, apareció este trabajo".
+    entregas = relationship(
+        "ItemEntrega", back_populates="trabajo",
+        order_by="ItemEntrega.id",
+    )
+
+class Entrega(Base):
+    """Un remito: el papel que firma el cliente al retirar mercadería.
+
+    Es la cabecera (cliente, número, fecha); el detalle (qué trabajos y
+    cuánto de cada uno) vive en ItemEntrega, mismo patrón que
+    Presupuesto/ItemPresupuesto. Existe como cabecera separada porque un
+    remito puede combinar VARIOS trabajos del mismo cliente en una sola
+    entrega física (ej: el cliente retira parte de dos pedidos distintos en
+    la misma visita) — antes de esto, un remito era siempre de un solo
+    trabajo, pero esa hipótesis no se sostuvo.
+
+    numero_remito es unique porque no hay guard de "primera vez": cada
+    remito es una acción de negocio real y repetible, así que siempre se
+    asigna un número nuevo al crearlo (ver _generar_numero_remito en
+    routers/entregas.py). La unicidad es lo que evita que dos clics
+    simultáneos peguen el mismo número; el endpoint reintenta si choca.
+    """
+    __tablename__ = "entregas"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cliente_id = Column(String, ForeignKey("clientes.id"), nullable=False, index=True)
+    numero_remito = Column(String, unique=True, index=True, nullable=False)
+    fecha = Column(DateTime, nullable=False)
+
+    cliente = relationship("Cliente")
+    items = relationship(
+        "ItemEntrega", back_populates="entrega",
+        cascade="all, delete-orphan", order_by="ItemEntrega.id",
+    )
+
+
+class ItemEntrega(Base):
+    """Un renglón de un remito: cuánto de UN trabajo se entregó en ESE remito.
+
+    numero_remito y fecha no se duplican acá: son propiedades que leen la
+    cabecera (self.entrega), así que TrabajoResponse.entregas (que expone
+    filas de esta clase) sigue mostrando esos datos como si fueran propios,
+    sin que el frontend tenga que saber que ahora viven en otro lado.
+    """
+    __tablename__ = "items_entrega"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    entrega_id = Column(String, ForeignKey("entregas.id"), nullable=False, index=True)
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=False, index=True)
+    cantidad = Column(Integer, nullable=False)
+
+    entrega = relationship("Entrega", back_populates="items")
+    trabajo = relationship("Trabajo", back_populates="entregas")
+
+    @property
+    def numero_remito(self) -> str:
+        return self.entrega.numero_remito
+
+    @property
+    def fecha(self):
+        return self.entrega.fecha
 
 class Movimiento(Base):
     __tablename__ = "movimientos"

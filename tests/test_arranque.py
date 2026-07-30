@@ -10,9 +10,11 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from datetime import datetime, timezone
+
 import models
-from arranque import _migrar_columna_archivado, _sembrar
-from conftest import crear_usuario
+from arranque import _migrar_columna_archivado, _migrar_entregas_legado, _sembrar
+from conftest import crear_cliente, crear_trabajo, crear_usuario
 from seguridad import verificar_password
 
 
@@ -154,3 +156,72 @@ def test_si_la_columna_ya_existe_no_hace_nada(db):
     """Contra la base normal de tests, que ya nace con 'archivado' (modelo
     actual): no tiene que fallar ni re-archivar nada."""
     _migrar_columna_archivado(db)  # no debe lanzar
+
+
+# --- Backfill de entregas legadas -------------------------------------------
+# El caso real: un Trabajo con numero_remito bajo el modelo viejo (un remito
+# por trabajo, sin combinar), de antes de que existieran Entrega/ItemEntrega.
+
+def test_migra_un_trabajo_con_numero_remito_legado(db):
+    cliente = crear_cliente(db)
+    fecha = datetime(2026, 1, 15, 10, 30, tzinfo=timezone.utc)
+    trabajo = crear_trabajo(
+        db, cliente, cantidad=100,
+        numero_remito="RE-000007", fecha_remito_impreso=fecha,
+    )
+
+    _migrar_entregas_legado(db)
+
+    entrega = db.query(models.Entrega).filter(models.Entrega.numero_remito == "RE-000007").first()
+    assert entrega is not None
+    assert entrega.cliente_id == cliente.id
+    # SQLite guarda el DateTime sin tzinfo (lo devuelve naive): se compara sin ella.
+    assert entrega.fecha == fecha.replace(tzinfo=None)
+
+    items = db.query(models.ItemEntrega).filter(models.ItemEntrega.entrega_id == entrega.id).all()
+    assert len(items) == 1
+    assert items[0].trabajo_id == trabajo.id
+    assert items[0].cantidad == 100
+
+
+def test_no_migra_trabajos_sin_numero_remito(db):
+    cliente = crear_cliente(db)
+    crear_trabajo(db, cliente, cantidad=50)  # nunca se imprimió remito
+
+    _migrar_entregas_legado(db)
+
+    assert db.query(models.Entrega).count() == 0
+
+
+def test_correr_el_backfill_dos_veces_no_duplica(db):
+    cliente = crear_cliente(db)
+    crear_trabajo(db, cliente, cantidad=100, numero_remito="RE-000009")
+
+    _migrar_entregas_legado(db)
+    _migrar_entregas_legado(db)  # no debe lanzar ni duplicar
+
+    assert db.query(models.Entrega).count() == 1
+    assert db.query(models.ItemEntrega).count() == 1
+
+
+def test_dos_trabajos_con_el_mismo_numero_remito_legado_no_tumban_el_arranque(db):
+    """El sistema viejo no garantizaba unicidad entre trabajos DISTINTOS
+    (_generar_numero_remito leía el máximo y sumaba 1 sin ningún lock): dos
+    remitos impresos casi al mismo tiempo podían quedar con el mismo número.
+    Entrega.numero_remito ahora es unique, así que sin este resguardo el
+    backfill (y el arranque del backend) se caería con un IntegrityError.
+    """
+    cliente = crear_cliente(db)
+    t1 = crear_trabajo(db, cliente, cantidad=50, numero_remito="RE-000005")
+    t2 = crear_trabajo(db, cliente, cantidad=30, numero_remito="RE-000005")
+
+    _migrar_entregas_legado(db)  # no debe lanzar
+
+    numeros = {e.numero_remito for e in db.query(models.Entrega).all()}
+    assert len(numeros) == 2, f"Se esperaban dos números distintos, hay: {numeros}"
+    assert "RE-000005" in numeros
+    assert any(n.startswith("RE-000005-DUP-") for n in numeros)
+
+    # Ambos trabajos quedaron migrados (ninguno se perdió por la colisión).
+    assert db.query(models.ItemEntrega).filter(models.ItemEntrega.trabajo_id == t1.id).count() == 1
+    assert db.query(models.ItemEntrega).filter(models.ItemEntrega.trabajo_id == t2.id).count() == 1

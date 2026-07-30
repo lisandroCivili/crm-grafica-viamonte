@@ -1,9 +1,10 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, computed_field, field_validator, model_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
 
 from .comun import _validar_monto_no_negativo
+from .entregas import ItemEntregaResponse
 
 # --- ESQUEMAS PARA TRABAJOS ---
 class TrabajoBase(BaseModel):
@@ -81,13 +82,21 @@ class TrabajoResponse(TrabajoBase):
     numero_orden: Optional[str] = None
     fecha_orden_impresa: Optional[datetime] = None
     papel_devuelto: bool = False
-    remito_impreso: bool = False
-    numero_remito: Optional[str] = None
-    fecha_remito_impreso: Optional[datetime] = None
+    # Entregas parciales: reemplaza a los viejos remito_impreso/numero_remito/
+    # fecha_remito_impreso. Cada fila es un renglón de un remito que incluyó
+    # a este trabajo (el remito puede haber combinado otros trabajos del
+    # mismo cliente). Ver models.Entrega / models.ItemEntrega.
+    entregas: list[ItemEntregaResponse] = []
     # Lo saca del tablero el endpoint /archivar, no un PUT: por eso va acá y no
     # en TrabajoBase. El Kanban lo lee para atenuar la tarjeta y ofrecer volverla.
     archivado: bool = False
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def cantidad_entregada(self) -> int:
+        """Suma de todas las entregas registradas (no se persiste)."""
+        return sum(e.cantidad for e in self.entregas)
 
 # Datos que se piden al pasar un trabajo de Aprobado a En Diseño.
 class IniciarDisenoRequest(BaseModel):

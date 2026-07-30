@@ -3,8 +3,9 @@ Armado del PDF de la Orden de Entrega (el remito que firma el cliente al retirar
 la mercadería).
 
 Hermano de pdf/orden.py y pdf/presupuesto.py: no toca la base de datos ni tiene
-efectos, sólo recibe el trabajo y el cliente ya cargados y devuelve los bytes
-del PDF. Los helpers compartidos (texto, ruta_asset) están en pdf/comun.py.
+efectos, sólo recibe la entrega (con sus ítems ya cargados) y el cliente y
+devuelve los bytes del PDF. Los helpers compartidos (texto, ruta_asset) están
+en pdf/comun.py.
 
 A diferencia de los otros dos comprobantes, el talonario físico se imprime por
 duplicado en una sola hoja A4: el mismo remito arriba y abajo, separados por una
@@ -13,10 +14,11 @@ guillotina y quedarse con una copia archivada. Por eso todo el layout está en
 _dibujar_remito(), parametrizado por la Y donde arranca cada mitad, y se llama
 dos veces.
 
-Un Trabajo es un solo ítem (ver ItemPresupuesto: un presupuesto multi-ítem
-genera un Trabajo por ítem), así que la tabla del remito lleva una sola fila de
-datos reales; el resto de renglones quedan en blanco para anotar a mano, igual
-que en el talonario de papel.
+Un remito (Entrega) puede combinar varios trabajos del mismo cliente: el
+cliente puede retirar en una sola visita parte de dos pedidos distintos. Por
+eso la tabla del remito lleva una fila real por cada ítem (ver
+models.ItemEntrega); el resto de renglones quedan en blanco para anotar a
+mano, igual que en el talonario de papel.
 
 El modelo Cliente hoy no tiene domicilio, localidad ni condición de IVA: esos
 renglones se imprimen con línea punteada o casillero vacío para completar a
@@ -55,6 +57,10 @@ CAMPOS_CLIENTE_CON_IVA = [
 ]
 
 FILAS_TABLA_BLANCO = 4
+# Total de renglones cuando el remito trae pocos ítems reales (hoy: 1 + 4
+# blancos). Con más ítems (remito combinado) la tabla crece para que entren
+# todos, sin renglones en blanco de más.
+FILAS_MINIMAS_TABLA = 1 + FILAS_TABLA_BLANCO
 ALTO_HEADER_TABLA = 6 * mm
 ALTO_FILA_TABLA = 7.5 * mm
 
@@ -198,9 +204,10 @@ def _dibujar_leyenda_tabla(c, y):
     return y - 4 * mm
 
 
-def _dibujar_tabla(c, y, trabajo):
-    """CANTIDAD / DESCRIPCION / OBSERVACIONES. Una sola fila con datos reales
-    (un Trabajo es un solo ítem); el resto queda en blanco para anotar a mano.
+def _dibujar_tabla(c, y, filas):
+    """CANTIDAD / DESCRIPCION / OBSERVACIONES. Una fila real por cada ítem
+    del remito (filas: lista de (cantidad, descripcion)); el resto queda en
+    blanco para anotar a mano, igual que en el talonario de papel.
     """
     ancho_cant = 22 * mm
     ancho_obs = 42 * mm
@@ -210,7 +217,7 @@ def _dibujar_tabla(c, y, trabajo):
     x2 = x1 + ancho_desc
     x3 = x2 + ancho_obs
 
-    total_filas = 1 + FILAS_TABLA_BLANCO
+    total_filas = max(len(filas), FILAS_MINIMAS_TABLA)
     alto_tabla = ALTO_HEADER_TABLA + total_filas * ALTO_FILA_TABLA
     y_header_bottom = y - ALTO_HEADER_TABLA
     y_bottom = y - alto_tabla
@@ -235,10 +242,12 @@ def _dibujar_tabla(c, y, trabajo):
         yy -= ALTO_FILA_TABLA
         c.line(x0, yy, x3, yy)
 
-    y_primera_fila = y_header_bottom - ALTO_FILA_TABLA
     c.setFont("Helvetica", 8)
-    c.drawCentredString((x0 + x1) / 2, y_primera_fila + 2.8 * mm, str(trabajo.cantidad))
-    c.drawString(x1 + 2 * mm, y_primera_fila + 2.8 * mm, texto(trabajo.descripcion_producto))
+    yy = y_header_bottom
+    for cantidad, descripcion in filas:
+        yy -= ALTO_FILA_TABLA
+        c.drawCentredString((x0 + x1) / 2, yy + 2.8 * mm, str(cantidad))
+        c.drawString(x1 + 2 * mm, yy + 2.8 * mm, texto(descripcion))
 
     return y_bottom
 
@@ -271,14 +280,14 @@ def _dibujar_footer(c, y0):
     _renglon(c, x_caja + 3 * mm, top - 19 * mm, ancho_interno, "D.N.I. N°")
 
 
-def _dibujar_remito(c, y0, numero, fecha_str, trabajo, cliente):
+def _dibujar_remito(c, y0, numero, fecha_str, filas, cliente):
     """Un remito completo, dibujado dentro de la mitad que arranca en y0."""
     y = y0 + MITAD - 8 * mm
     y = _dibujar_header(c, y, numero, fecha_str)
     y = _dibujar_cliente(c, y, cliente)
     y -= 1.5 * mm
     y = _dibujar_leyenda_tabla(c, y)
-    _dibujar_tabla(c, y, trabajo)
+    _dibujar_tabla(c, y, filas)
     _dibujar_footer(c, y0)
 
 
@@ -291,20 +300,24 @@ def _dibujar_guia_corte(c):
     c.restoreState()
 
 
-def construir_entrega_pdf(trabajo, cliente) -> bytes:
-    """Devuelve los bytes del PDF de la orden de entrega (remito), duplicado
-    en la mitad superior e inferior de una hoja A4 para cortar con guillotina.
+def construir_entrega_pdf(entrega, cliente) -> bytes:
+    """Devuelve los bytes del PDF del remito, duplicado en la mitad superior
+    e inferior de una hoja A4 para cortar con guillotina.
+
+    entrega trae el número, la fecha y sus ítems (entrega.items, cada uno con
+    su trabajo y cantidad) — un remito con un solo ítem es el caso simple de
+    siempre; con varios, combina trabajos distintos del mismo cliente.
     """
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
-    numero = texto(trabajo.numero_remito)
+    numero = texto(entrega.numero_remito)
     c.setTitle(f"Orden de entrega {numero}")
 
-    fecha = trabajo.fecha_remito_impreso or trabajo.fecha_creacion
-    fecha_str = fecha.strftime("%d/%m/%Y") if fecha else "-"
+    fecha_str = entrega.fecha.strftime("%d/%m/%Y") if entrega.fecha else "-"
+    filas = [(item.cantidad, item.trabajo.descripcion_producto) for item in entrega.items]
 
-    _dibujar_remito(c, MITAD, numero, fecha_str, trabajo, cliente)
-    _dibujar_remito(c, 0, numero, fecha_str, trabajo, cliente)
+    _dibujar_remito(c, MITAD, numero, fecha_str, filas, cliente)
+    _dibujar_remito(c, 0, numero, fecha_str, filas, cliente)
     _dibujar_guia_corte(c)
 
     c.showPage()

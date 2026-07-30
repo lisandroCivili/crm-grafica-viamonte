@@ -33,6 +33,7 @@ son idempotentes salvo donde se aclare: correrlos dos veces no rompe.
 | 7 | `migracion_devolucion_papel` | 2026-07-20 | `trabajos.papel_devuelto`, para el reingreso de pliegos al cancelar. |
 | 8 | `migracion_papel_presupuesto` | 2026-07-21 | El papel viaja del presupuesto al trabajo (`papel_id`, `cantidad_pliegos`). |
 | 9 | `migracion_archivo_kanban` | 2026-07-29 | `trabajos.archivado`, para sacar del tablero el histórico de entregados. Desde este script en adelante, la columna se agrega sola al arrancar el backend (ver nota de Railway abajo) — correrlo a mano ya es opcional. |
+| 10 | `migracion_entregas_parciales` | 2026-07-30 | Backfill de `entregas`/`items_entrega` (remitos, ahora un encabezado por entrega que puede combinar varios trabajos) a partir de `trabajos.numero_remito` legado. Sin `ALTER TABLE`: las tablas son nuevas y las crea sola `create_all()`. Igual que el anterior, corre solo en `arranque.py` — correrlo a mano ya es opcional. |
 
 Las cuatro del 2026-07-17 entraron en el mismo commit; entre ellas el orden es
 indistinto (tocan tablas distintas).

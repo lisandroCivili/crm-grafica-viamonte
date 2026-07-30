@@ -65,11 +65,18 @@ def _sembrar(db: Session) -> list[str]:
         db.commit()
         creados.append(nombre)
 
+    marcos_db = db.query(models.Usuario).filter(models.Usuario.nombre == "marcos").first()
+    if marcos_db and marcos_db.rol != ROL_ADMIN:
+        marcos_db.rol = ROL_ADMIN
+        db.commit()
+        print("✅ Permisos de Marcos actualizados a ADMIN")
+
     return creados
 
 
 def aplicar_migraciones_pendientes() -> None:
-    """Suma al esquema las columnas que create_all() no pudo agregar solo.
+    """Suma al esquema las columnas que create_all() no pudo agregar solo, y
+    corre los backfills de datos que dependen de tablas nuevas.
 
     create_all() (main.py) sólo crea tablas que no existen: nunca agrega
     columnas a una tabla ya creada (ver migraciones/README.md). En la compu
@@ -80,6 +87,7 @@ def aplicar_migraciones_pendientes() -> None:
     db = SessionLocal()
     try:
         _migrar_columna_archivado(db)
+        _migrar_entregas_legado(db)
     finally:
         db.close()
 
@@ -103,3 +111,58 @@ def _migrar_columna_archivado(db: Session) -> None:
         "UPDATE trabajos SET archivado = 1 WHERE estado = 'Entregado' AND archivado = 0"
     ))
     db.commit()
+
+
+def _migrar_entregas_legado(db: Session) -> None:
+    """Convierte cada Trabajo.numero_remito legado en un Entrega con un solo
+    ItemEntrega, para no perder el historial de remitos ya emitidos.
+
+    Mismo backfill que migraciones/migracion_entregas_parciales.py (ahí está
+    el detalle de por qué el remito pasó a admitir varios trabajos); se repite
+    acá porque el servidor no tiene consola donde correr ese script a mano.
+    No hay ALTER TABLE: 'entregas'/'items_entrega' ya las creó create_all()
+    antes de llegar acá (ver el orden de llamadas en main.py).
+
+    Idempotente: sólo migra los trabajos que todavía no tienen ItemEntrega.
+    Commitea trabajo por trabajo (no todo junto al final) para que, si uno
+    falla, no se pierda lo que ya se migró antes en la misma corrida.
+    """
+    from datetime import datetime, time
+
+    from sqlalchemy.exc import IntegrityError
+
+    candidatos = db.query(models.Trabajo).filter(models.Trabajo.numero_remito.isnot(None)).all()
+    for trabajo in candidatos:
+        ya_migrado = db.query(models.ItemEntrega).filter(
+            models.ItemEntrega.trabajo_id == trabajo.id
+        ).first()
+        if ya_migrado:
+            continue
+
+        fecha = trabajo.fecha_remito_impreso or datetime.combine(trabajo.fecha_creacion, time.min)
+        numero = trabajo.numero_remito
+        try:
+            entrega = models.Entrega(cliente_id=trabajo.cliente_id, numero_remito=numero, fecha=fecha)
+            db.add(entrega)
+            db.flush()
+        except IntegrityError:
+            # El sistema viejo no garantizaba unicidad de numero_remito entre
+            # trabajos DISTINTOS (_generar_numero_remito leía el máximo y
+            # sumaba 1 sin ningún lock; el guard sólo protegía contra
+            # reimprimir el mismo trabajo dos veces). Si dos remitos se
+            # imprimieron casi al mismo tiempo históricamente, pueden compartir
+            # número. Acá eso NO puede tumbar el arranque entero: se marca el
+            # duplicado con un sufijo y sigue.
+            db.rollback()
+            numero = f"{trabajo.numero_remito}-DUP-{trabajo.id[:8]}"
+            entrega = models.Entrega(cliente_id=trabajo.cliente_id, numero_remito=numero, fecha=fecha)
+            db.add(entrega)
+            db.flush()
+            print(f"⚠️  Remito legado duplicado: trabajo {trabajo.id} migrado como {numero}.")
+
+        db.add(models.ItemEntrega(
+            entrega_id=entrega.id,
+            trabajo_id=trabajo.id,
+            cantidad=trabajo.cantidad,
+        ))
+        db.commit()

@@ -9,6 +9,7 @@ mantienen separados, como pide la convención del proyecto.
 from .auditoria import AuditoriaResponse
 from .auth import LoginRequest, TokenResponse, UsuarioResponse
 from .clientes import ClienteBase, ClienteCreate, ClienteResponse, ClienteUpdate
+from .entregas import EntregaCreate, ItemEntregaCreate, ItemEntregaResponse
 from .trabajos import (
     TrabajoBase,
     TrabajoCreate,

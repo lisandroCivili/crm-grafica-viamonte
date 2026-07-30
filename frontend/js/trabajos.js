@@ -315,7 +315,7 @@ async function soltarTarjeta(ev, nuevoEstado) {
 // funciona con el dedo: en el celular se llega acá desde el botón "Mover a" de
 // la tarjeta. Las reglas de a dónde puede ir un trabajo viven todas acá, así
 // que el menú y el arrastre se comportan igual.
-async function moverTrabajo(id, nuevoEstado) {
+async function moverTrabajo(id, nuevoEstado, forzar = false) {
     // No movemos el DOM de entrada: con los guards nuevos el backend rechaza
     // seguido. Dejamos que refrescarTablero() posicione la tarjeta según la
     // respuesta real, así nunca queda en una columna donde el backend no la puso.
@@ -332,13 +332,29 @@ async function moverTrabajo(id, nuevoEstado) {
     }
 
     try {
-        const resp = await fetch(`${API_URL}/trabajos/${id}`, {
+        const url = `${API_URL}/trabajos/${id}${forzar ? '?forzar=true' : ''}`;
+        const resp = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ estado: nuevoEstado })
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
+            // 400 típico al marcar Entregado: queda mercadería sin entregar.
+            // El propio mensaje del backend ya trae la pregunta armada.
+            if (resp.status === 400 && nuevoEstado === "Entregado" && !forzar) {
+                const r = await Swal.fire({
+                    title: 'Queda mercadería sin entregar',
+                    text: detalleError(err, ''),
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Marcarlo Entregado igual',
+                    cancelButtonText: 'Cancelar'
+                });
+                if (r.isConfirmed) return moverTrabajo(id, nuevoEstado, true);
+                refrescarTablero();
+                return;
+            }
             throw new Error(detalleError(err, "El backend rechazó el cambio de estado."));
         }
         refrescarTablero();
@@ -621,15 +637,7 @@ async function descargarOrden(id, forzar = false) {
             throw new Error(detalleError(err, "No se pudo generar la orden."));
         }
 
-        const blob = await resp.blob();
-        const enlace = document.createElement('a');
-        enlace.href = URL.createObjectURL(blob);
-        enlace.download = `orden_${id.substring(0,6).toUpperCase()}.pdf`;
-        document.body.appendChild(enlace);
-        enlace.click();
-        enlace.remove();
-        URL.revokeObjectURL(enlace.href);
-
+        _descargarBlobPdf(await resp.blob(), `orden_${id.substring(0,6).toUpperCase()}.pdf`);
         refrescarTablero();
         cargarSelectoresPapel(); // el stock cambió
         return true;
@@ -638,32 +646,121 @@ async function descargarOrden(id, forzar = false) {
         return false;
     }
 }
-// Descarga el remito (orden de entrega) del trabajo. Mismo patrón que
-// descargarOrden: la numeración es idempotente en el backend, reimprimir no
-// genera un número nuevo ni repite ningún efecto (a diferencia de la orden,
-// el remito no toca stock).
-async function descargarRemito(id) {
+// Descarga el blob de una respuesta ya OK como PDF, con el nombre indicado.
+// Repetido en descargarOrden, registrarEntrega y reimprimirEntrega: son tres
+// descargas de PDF con el mismo ritual de <a> temporal.
+function _descargarBlobPdf(blob, nombreArchivo) {
+    const enlace = document.createElement('a');
+    enlace.href = URL.createObjectURL(blob);
+    enlace.download = nombreArchivo;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    URL.revokeObjectURL(enlace.href);
+}
+
+// Modal de entregas parciales de un trabajo: lista los remitos ya emitidos
+// (cada uno con su botón para reimprimir sin generar nada nuevo) y, si queda
+// saldo, un formulario para registrar una entrega nueva.
+async function abrirModalEntregas(id) {
+    const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
+    const t = trabajos.find(x => x.id === id);
+    if (!t) { refrescarTablero(); return; }
+
+    const entregas = t.entregas || [];
+    const pendiente = t.cantidad - (t.cantidad_entregada || 0);
+
+    const filasHtml = entregas.length
+        ? entregas.map(e => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #eee;">
+                <span style="font-size:13px;">${esc(e.numero_remito)} · ${e.cantidad}u · ${new Date(e.fecha).toLocaleDateString('es-AR')}</span>
+                <button type="button" class="btn btn-mini" onclick="reimprimirEntrega('${e.entrega_id}')">🖨️ Reimprimir</button>
+            </div>
+        `).join('')
+        : '<p style="font-size:13px; color:var(--muted);">Todavía no se registró ninguna entrega.</p>';
+
+    const formHtml = pendiente > 0
+        ? `<hr style="margin:10px 0;">
+           <label style="font-size:13px; display:block; margin-bottom:4px;">Saldo pendiente: ${pendiente} de ${t.cantidad}</label>
+           <input id="swal-cant-entrega" type="number" min="1" step="1" class="swal2-input" value="${pendiente}" placeholder="Cantidad a entregar">`
+        : `<hr style="margin:10px 0;"><p style="font-size:13px; color:var(--green);">✔ Entrega completa (${t.cantidad_entregada}/${t.cantidad}).</p>`;
+
+    const { value: cantidad } = await Swal.fire({
+        title: 'Entregas / Remitos',
+        html: `<div style="text-align:left; max-height:260px; overflow-y:auto;">${filasHtml}</div>${formHtml}`,
+        focusConfirm: false,
+        showCancelButton: true,
+        showConfirmButton: pendiente > 0,
+        confirmButtonText: 'Registrar entrega',
+        cancelButtonText: pendiente > 0 ? 'Cancelar' : 'Cerrar',
+        preConfirm: () => {
+            const valor = parseInt(document.getElementById('swal-cant-entrega').value);
+            if (!valor || valor <= 0) {
+                Swal.showValidationMessage('Ingresá una cantidad mayor a cero.');
+                return false;
+            }
+            return valor;
+        }
+    });
+
+    if (cantidad) {
+        await registrarEntrega(t.cliente_id, id, cantidad);
+    }
+}
+
+// Registra una entrega de un solo trabajo (el caso simple del botón de la
+// tarjeta) y descarga su remito. Por debajo pega al mismo endpoint que la
+// entrega combinada de varios trabajos (ver clientes.js/confirmarNuevaEntrega),
+// con una lista de un solo ítem. Si supera el saldo pendiente, ofrece forzar
+// igual que descargarOrden con el stock.
+async function registrarEntrega(clienteId, trabajoId, cantidad, forzar = false) {
     try {
-        const resp = await fetch(`${API_URL}/trabajos/${id}/orden-entrega`, { method: 'POST' });
+        const url = `${API_URL}/entregas${forzar ? '?forzar=true' : ''}`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cliente_id: clienteId, items: [{ trabajo_id: trabajoId, cantidad }] })
+        });
+
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(detalleError(err, "No se pudo generar el remito."));
+            if (resp.status === 400 && !forzar) {
+                const r = await Swal.fire({
+                    title: 'Supera el saldo pendiente',
+                    text: detalleError(err, '') + ' ¿Registrar igual?',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Registrar igual',
+                    cancelButtonText: 'Cancelar'
+                });
+                if (r.isConfirmed) return registrarEntrega(clienteId, trabajoId, cantidad, true);
+                return false;
+            }
+            throw new Error(detalleError(err, "No se pudo registrar la entrega."));
         }
 
-        const blob = await resp.blob();
-        const enlace = document.createElement('a');
-        enlace.href = URL.createObjectURL(blob);
-        enlace.download = `remito_${id.substring(0,6).toUpperCase()}.pdf`;
-        document.body.appendChild(enlace);
-        enlace.click();
-        enlace.remove();
-        URL.revokeObjectURL(enlace.href);
-
+        _descargarBlobPdf(await resp.blob(), `remito_${trabajoId.substring(0,6).toUpperCase()}.pdf`);
         refrescarTablero();
         return true;
     } catch (error) {
-        Swal.fire('No se pudo imprimir el remito', error.message, 'error');
+        Swal.fire('No se pudo registrar la entrega', error.message, 'error');
         return false;
+    }
+}
+
+// Reimprime un remito ya emitido: sin efectos, no crea nada ni cambia
+// numeración. entregaId es el REMITO (puede traer más de un trabajo, si se
+// combinaron varios en la misma entrega).
+async function reimprimirEntrega(entregaId) {
+    try {
+        const resp = await fetch(`${API_URL}/entregas/${entregaId}/pdf`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo reimprimir el remito."));
+        }
+        _descargarBlobPdf(await resp.blob(), `remito_${entregaId.substring(0,6).toUpperCase()}.pdf`);
+    } catch (error) {
+        Swal.fire('No se pudo reimprimir', error.message, 'error');
     }
 }
 async function cargarTrabajos() {
@@ -736,6 +833,14 @@ async function cargarTrabajos() {
         const badgeArchivado = archivado
             ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#e9ecef; color:#495057; border:1px solid var(--muted); padding:2px 6px; border-radius:4px;">📦 Fuera del tablero</span></div>`
             : '';
+        // Entrega parcial en curso: hay al menos una entrega registrada pero
+        // todavía no se completó la cantidad total del trabajo. Sin este aviso
+        // no hay forma de saber, mirando el tablero, que falta terminar de
+        // entregar algo que ya se empezó a entregar.
+        const cantidadEntregada = t.cantidad_entregada || 0;
+        const badgeEntregaParcial = (t.entregas && t.entregas.length && cantidadEntregada < t.cantidad)
+            ? `<div style="margin-top:4px;"><span style="font-size:10px; background:#d1ecf1; color:#0c5460; border:1px solid var(--blue, #0c5460); padding:2px 6px; border-radius:4px;">📦 Entregado: ${cantidadEntregada}/${t.cantidad}</span></div>`
+            : '';
 
         // Sacar del tablero es sólo para lo que ya terminó: un trabajo en curso
         // que desaparece de la única pantalla donde se lo sigue es un trabajo
@@ -758,8 +863,8 @@ async function cargarTrabajos() {
               <button class="btn btn-mini no-print" onclick="descargarOrden('${t.id}')">
                 ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
               </button>
-              <button class="btn btn-mini no-print" onclick="descargarRemito('${t.id}')">
-                ${t.remito_impreso ? '🖨️ Reimprimir Remito' : '🖨️ Imprimir Remito'}
+              <button class="btn btn-mini no-print" onclick="abrirModalEntregas('${t.id}')">
+                ${(t.entregas && t.entregas.length) ? '📦 Entregas / Remitos' : '🖨️ Registrar entrega'}
               </button>
               <button class="btn btn-mini no-print" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>${botonArchivar}`;
 
@@ -776,6 +881,7 @@ async function cargarTrabajos() {
               ${badgeCancelado}
               ${badgeArchivado}
               ${badgeSinPresu}
+              ${badgeEntregaParcial}
               <div class="client">${cliente ? esc(cliente.nombre_completo) : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${esc(t.descripcion_producto)}</div>
               <div class="date">${t.fecha_creacion}${puedeVerPlata() ? ` - $${fmtMoney(t.precio_venta)}` : ''}</div>
