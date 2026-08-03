@@ -92,21 +92,39 @@ app.include_router(auth.router)  # Incluimos el router de autenticación
 # routers se saltea todos los permisos de módulo, así que el candado va acá.
 @app.get("/api/backup", dependencies=[Depends(solo_admin)])
 def descargar_respaldo():
+    import sqlite3
+    import tempfile
+
+    from starlette.background import BackgroundTask
+
     db_path = os.path.join(BASE_DIR, "viamonte.db")
-    
+
     # Verificamos que el archivo exista por las dudas
     if not os.path.exists(db_path):
         raise HTTPException(status_code=404, detail="Base de datos no encontrada")
-    
-    # Armamos un nombre de archivo con la fecha de hoy
+
+    # Con WAL activo (ver database.py), los cambios más recientes viven en
+    # viamonte.db-wal y no en el .db: copiar el archivo tal cual con
+    # FileResponse podía dejar el respaldo incompleto, o directamente a medio
+    # escribir si alguien guardaba algo en el momento de la descarga. La API
+    # de backup de sqlite3 hace una copia consistente (incluye el WAL) sin
+    # bloquear al resto de la aplicación.
+    destino = os.path.join(tempfile.gettempdir(), f"respaldo_viamonte_{os.getpid()}.db")
+    origen = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    copia = sqlite3.connect(destino)
+    try:
+        with copia:
+            origen.backup(copia)
+    finally:
+        origen.close()
+        copia.close()
+
     fecha_str = datetime.now().strftime("%d-%m-%Y")
-    nombre_archivo = f"respaldo_viamonte_{fecha_str}.db"
-    
-    # Forzamos la descarga del archivo
     return FileResponse(
-        path=db_path, 
-        filename=nombre_archivo, 
-        media_type='application/octet-stream'
+        path=destino,
+        filename=f"respaldo_viamonte_{fecha_str}.db",
+        media_type="application/octet-stream",
+        background=BackgroundTask(os.remove, destino),
     )
 
 # Queda sin token a propósito: es el healthcheck con el que el servidor decide
