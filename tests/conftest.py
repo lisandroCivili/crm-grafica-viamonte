@@ -99,6 +99,18 @@ def db(db_factory):
         sesion.close()
 
 
+@pytest.fixture(autouse=True)
+def _limpiar_intentos_fallidos_login():
+    """El contador de intentos fallidos de login (routers/auth.py) vive en
+    memoria del proceso, no en la base de datos de cada test: sin limpiarlo
+    acá, un test que agota el máximo de intentos con un nombre (ej. "lisandro")
+    dejaría bloqueado a cualquier otro test que loguee ese mismo nombre."""
+    from routers.auth import _intentos_fallidos
+    _intentos_fallidos.clear()
+    yield
+    _intentos_fallidos.clear()
+
+
 # --- Fábricas de datos ------------------------------------------------------
 # Crean directamente por ORM y no por la API: lo que se prueba es el endpoint
 # bajo test, no el de alta. Devuelven el objeto ya commiteado.

@@ -8,6 +8,9 @@ cada pedido.
 
 Las piezas de seguridad (hash, token, dependencies) viven en seguridad.py.
 """
+import time
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -28,10 +31,40 @@ ENTIDAD = "Sesión"
 # se pueda usar el log como depósito de lo que se le ocurra.
 LARGO_MAXIMO_NOMBRE = 50
 
+# Cuántos intentos fallidos seguidos se toleran por nombre de usuario antes de
+# frenar, y por cuánto. En memoria del proceso y no en la base: un reinicio los
+# limpia, que es aceptable, y así un ataque no escribe una fila por intento. Va
+# por nombre y no por IP porque detrás del router del taller todos comparten IP.
+MAX_INTENTOS = 5
+BLOQUEO_SEGUNDOS = 300  # 5 minutos
+
+_intentos_fallidos: dict[str, list[float]] = defaultdict(list)
+
+
+def _esta_bloqueado(nombre: str) -> int:
+    """Segundos que faltan para poder reintentar, o 0 si puede intentar ahora."""
+    ahora = time.monotonic()
+    recientes = [t for t in _intentos_fallidos[nombre] if ahora - t < BLOQUEO_SEGUNDOS]
+    _intentos_fallidos[nombre] = recientes
+    if len(recientes) < MAX_INTENTOS:
+        return 0
+    return int(BLOQUEO_SEGUNDOS - (ahora - recientes[0])) + 1
+
 
 @router.post("/login", response_model=schemas.TokenResponse)
 def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     nombre = data.usuario.strip().lower()
+
+    # Se corta ANTES de tocar la base: un ataque no escribe una fila por intento
+    # ni consume el bcrypt (que es caro a propósito).
+    espera = _esta_bloqueado(nombre)
+    if espera:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Demasiados intentos fallidos. Probá de nuevo en {espera} segundos.",
+            headers={"Retry-After": str(espera)},
+        )
+
     usuario = db.query(models.Usuario).filter(models.Usuario.nombre == nombre).first()
 
     # Un solo mensaje para los tres casos (no existe, contraseña mal, dado de
@@ -50,11 +83,13 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
         # Necesita su propio commit porque el 401 de abajo corta el endpoint: sin
         # esto, la sesión se cierra sin escribir y el intento se pierde justo en
         # el caso en que más interesa verlo.
+        _intentos_fallidos[nombre].append(time.monotonic())
         asentar(db, None, models.ACCION_INGRESO_FALLIDO, ENTIDAD, None,
                 f"intento con el nombre '{nombre[:LARGO_MAXIMO_NOMBRE]}'")
         db.commit()
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
 
+    _intentos_fallidos.pop(nombre, None)  # entró bien: se limpia el contador
     usuario.ultimo_login = ahora_local()
     asentar(db, usuario, models.ACCION_INGRESO, ENTIDAD, usuario.id,
             f"{usuario.nombre} ({usuario.rol}) entró al sistema")

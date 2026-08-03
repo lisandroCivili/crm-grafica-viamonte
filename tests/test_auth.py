@@ -68,6 +68,43 @@ class TestLogin:
 
         assert login(client, "  MARCOS ", "secreta123").status_code == 200
 
+
+# --- Bloqueo por intentos fallidos (A-03) ------------------------------------
+
+class TestBloqueoPorIntentosFallidos:
+
+    def test_bloquea_al_sexto_intento_fallido_seguido(self, client, db):
+        crear_usuario(db, nombre="lisandro", password="secreta123")
+
+        for _ in range(5):
+            assert login(client, "lisandro", "mala").status_code == 401
+
+        r = login(client, "lisandro", "secreta123")  # ni con la clave correcta
+
+        assert r.status_code == 429
+        assert "Retry-After" in r.headers
+
+    def test_el_bloqueo_es_por_nombre_no_global(self, client, db):
+        crear_usuario(db, nombre="lisandro", password="secreta123")
+        crear_usuario(db, nombre="marcos", password="secreta123")
+
+        for _ in range(5):
+            login(client, "lisandro", "mala")
+
+        assert login(client, "marcos", "secreta123").status_code == 200
+
+    def test_un_login_correcto_limpia_el_contador(self, client, db):
+        crear_usuario(db, nombre="lisandro", password="secreta123")
+
+        for _ in range(4):
+            login(client, "lisandro", "mala")
+        assert login(client, "lisandro", "secreta123").status_code == 200
+
+        # El contador se limpió: hacen falta 5 fallos nuevos para bloquear, no uno.
+        for _ in range(4):
+            assert login(client, "lisandro", "mala").status_code == 401
+        assert login(client, "lisandro", "secreta123").status_code == 200
+
     def test_guarda_la_contrasena_hasheada(self, client, db):
         crear_usuario(db, nombre="lisandro", password="secreta123")
 
