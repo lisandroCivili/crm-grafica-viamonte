@@ -1,4 +1,5 @@
-"""Armado de los PDF del taller (orden de producción, presupuesto y remito).
+"""Armado de los PDF del taller (orden de producción, presupuesto, remito,
+costos internos e informe diario).
 
 Reemplaza a los antiguos orden_pdf.py y presupuesto_pdf.py, que compartían
 helpers duplicados (_texto idéntico, _ruta_logo/_ruta_asset gemelas). Ahora esos
@@ -10,3 +11,5 @@ Se re-exportan las funciones públicas para que los routers sigan importando
 from .orden import construir_orden_pdf
 from .presupuesto import construir_presupuesto_pdf
 from .entrega import construir_entrega_pdf
+from .costos import construir_costos_pdf
+from .informe_diario import construir_informe_diario_pdf

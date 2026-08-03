@@ -1,7 +1,7 @@
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import models, schemas
 from database import get_db
 from datetime import date, datetime, timedelta, timezone
@@ -9,7 +9,7 @@ from money import Q2, Q3
 from auditoria import asentar, cambios
 from calculos import calcular_saldo_trabajo
 from papel import buscar_papel, validar_papel
-from pdf import construir_orden_pdf
+from pdf import construir_informe_diario_pdf, construir_orden_pdf
 from routers._comun import obtener_o_404
 from trabajos_comun import resumen_trabajo, saldo_pendiente_entrega
 from seguridad import (
@@ -418,6 +418,47 @@ def listar_trabajos(
         }
         trabajos = [t for t in trabajos if t.id not in ids_con_presupuesto]
     return [_trabajo_visible(t, usuario) for t in trabajos]
+
+
+# Estados donde alguien del taller tiene una tarea pendiente en la mano hoy.
+# 'Aprobado' (todavía no arrancó) y 'Entregado' (ya terminó) quedan afuera: el
+# pedido fue puntual, una hoja de ruta para el día, no el tablero completo.
+ESTADOS_HOJA_DE_RUTA = ("En Diseño", "En Producción")
+
+
+@router.get("/informe-diario/pdf")
+def informe_diario_pdf(db: Session = Depends(get_db)):
+    """PDF de la hoja de ruta: lo que el taller tiene para hacer hoy.
+
+    Reemplaza la vieja captura de pantalla del Kanban (html2pdf/html2canvas),
+    que salía como imagen y cortaba columnas al pasar de página. Sin precio ni
+    costo: es una hoja de trabajo del taller, no un documento de facturación
+    (mismo espíritu que CAMPOS_DE_PLATA, acá directamente no se piden esas
+    columnas). Entran los tres puestos, igual que el resto del router.
+    """
+    trabajos = (
+        db.query(models.Trabajo)
+        .options(joinedload(models.Trabajo.cliente), joinedload(models.Trabajo.papel))
+        .filter(
+            models.Trabajo.estado.in_(ESTADOS_HOJA_DE_RUTA),
+            models.Trabajo.archivado.isnot(True),
+        )
+        # Sin fecha de entrega al final: lo urgente primero.
+        .order_by(models.Trabajo.fecha_entrega.is_(None), models.Trabajo.fecha_entrega)
+        .all()
+    )
+
+    por_estado = {estado: [] for estado in ESTADOS_HOJA_DE_RUTA}
+    for t in trabajos:
+        por_estado[t.estado].append(t)
+
+    pdf = construir_informe_diario_pdf(por_estado)
+    fecha_str = date.today().strftime("%d-%m-%Y")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="Hoja_de_Ruta_{fecha_str}.pdf"'},
+    )
 
 @router.put("/{trabajo_id}", response_model=schemas.TrabajoResponse)
 def actualizar_trabajo(

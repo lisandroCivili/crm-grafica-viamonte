@@ -665,12 +665,6 @@ async function convertirATrabajo(presupuesto_id, button) {
 // ----------------------------------------------------
 // GENERADORES DE PDF (Doble versión)
 // ----------------------------------------------------
-async function armarMoldeBasePDF(presupuesto_id) {
-    const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
-    const p = (await respP.json()).find(x => x.id === presupuesto_id);
-    const c = (await respC.json()).find(x => x.id === p.cliente_id);
-    return { p, c };
-}
 
 // PDF PARA EL CLIENTE (formal, formato Gráfica Viamonte)
 // El PDF se arma en el backend con ReportLab (Etapa B): acá sólo se pide el
@@ -701,57 +695,38 @@ async function generarPDFCliente(presupuesto_id) {
     }
 }
 
-// PDF INTERNO (Detalle de todos los costos e ítems del formulario)
+// PDF INTERNO (Detalle de todos los costos e ítems del presupuesto)
+// El PDF se arma en el backend con ReportLab/Platypus (mismo patrón que
+// generarPDFCliente): antes se armaba en el navegador con html2pdf, capturando
+// el HTML como imagen, y una tabla de costos se cortaba a la mitad al pasar
+// de página porque html2pdf no pagina de verdad. Acá la paginación la hace
+// ReportLab, y de paso queda con manejo de errores (antes esta función no
+// tenía try/catch: un fallo del render quedaba mudo, sin avisarle nada al
+// usuario que apretó el botón).
 async function generarPDFInterno(presupuesto_id) {
-    const { p, c } = await armarMoldeBasePDF(presupuesto_id);
-    const nombreCliente = c ? c.nombre_completo : 'Sin cliente';
-    const shortId = p.id.substring(0,6).toUpperCase();
-    const items = p.items || [];
-
-    // Una sección por producto: su desglose de costos, subtotal y precio.
-    let totalPresupuesto = 0;
-    const secciones = items.map((it, idx) => {
-        const totalItem = Number(it.cantidad) * Number(it.precio_unitario);
-        totalPresupuesto += totalItem;
-        const costo = Number(it.costo_materiales || 0);
-
-        let filasCostos = '';
-        for (const [nombre, monto] of Object.entries(it.detalles_costos || {})) {
-            filasCostos += `<tr><td style="border:1px solid #ddd; padding:8px;">${esc(nombre)}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(monto)}</td></tr>`;
+    try {
+        const resp = await fetch(`${API_URL}/presupuestos/${presupuesto_id}/pdf-interno`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo generar la hoja de costos."));
         }
-        if (!filasCostos) filasCostos = `<tr><td colspan="2" style="border:1px solid #ddd; padding:8px; color:#999;">Sin costos cargados</td></tr>`;
 
-        // page-break-inside: avoid evita que un producto se corte a la mitad al
-        // pasar de página; el bloque entero salta a la hoja siguiente.
-        return `
-        <div style="margin-top:18px; page-break-inside:avoid; break-inside:avoid;">
-            <p style="font-size:13px; margin:2px 0;"><b>Producto ${idx + 1}:</b> ${it.cantidad}x ${esc(it.descripcion)}</p>
-            <p style="font-size:13px; margin:2px 0;"><b>Material:</b> ${esc(it.material) || '-'} &nbsp;|&nbsp; <b>Gramaje:</b> ${it.gramaje ? esc(it.gramaje) + ' g/m²' : '-'}</p>
-            <p style="font-size:13px; margin:2px 0;"><b>Precio unitario:</b> $ ${fmtMoney(it.precio_unitario)} &nbsp;|&nbsp; <b>Total:</b> $ ${fmtMoney(totalItem)}</p>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
-                <tr style="background:#eee;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Ítem de Costo</th><th style="border:1px solid #ddd; padding:8px; text-align:right;">Monto</th></tr>
-                ${filasCostos}
-                <tr style="background:#ffe6f2;"><td style="border:1px solid #ddd; padding:8px;"><b>SUBTOTAL COSTOS</b></td><td style="border:1px solid #ddd; padding:8px; text-align:right;"><b>$ ${fmtMoney(costo)}</b></td></tr>
-                <tr><td style="border:1px solid #ddd; padding:8px;">Ganancia estimada${it.margen_ganancia != null ? ` (${it.margen_ganancia}%)` : ''}</td><td style="border:1px solid #ddd; padding:8px; text-align:right;">$ ${fmtMoney(totalItem - costo)}</td></tr>
-            </table>
-        </div>`;
-    }).join('');
+        const dispo = resp.headers.get('Content-Disposition') || '';
+        const match = dispo.match(/filename="?([^"]+)"?/);
+        const nombreArchivo = match ? match[1] : `Costos_Internos_${presupuesto_id.substring(0, 6).toUpperCase()}.pdf`;
 
-    const div = document.createElement('div');
-    div.style.padding = '40px'; div.style.fontFamily = 'Arial';
-    div.innerHTML = `
-        <h2 style="margin-bottom:6px;">[INTERNO] Hoja de Costos - #${shortId}</h2>
-        <p style="font-size:13px; margin:2px 0;"><b>Cliente:</b> ${esc(nombreCliente)}</p>
-        ${secciones}
-        <h3 style="text-align:right; color:#D5006D; margin-top:20px;">PRECIO FINAL COBRADO: $ ${fmtMoney(totalPresupuesto)}</h3>
-    `;
-    // pagebreak avoid-all + css: respeta el page-break-inside:avoid de cada
-    // producto para no cortar un bloque por la mitad entre páginas.
-    html2pdf().set({
-        margin: 10,
-        filename: `Costos_Internos_${shortId}.pdf`,
-        pagebreak: { mode: ['avoid-all', 'css'] },
-    }).from(div).save();
+        const blob = await resp.blob();
+        const enlace = document.createElement('a');
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        URL.revokeObjectURL(enlace.href);
+    } catch (error) {
+        console.error('Error generando la hoja de costos:', error);
+        Swal.fire('No se pudo generar la hoja de costos', error.message, 'error');
+    }
 }
 
 // Informe general de trabajos a clientes. Se arma desde los presupuestos

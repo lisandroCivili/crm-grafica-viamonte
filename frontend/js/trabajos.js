@@ -1029,14 +1029,35 @@ function descargarMovimientosPDF() {
     html2pdf().set({ margin: 10, filename: 'Historial_Movimientos.pdf' }).from(elemento).save();
 }
 
+// Hoja de Ruta: lo que el taller tiene para hacer HOY (En Diseño + En
+// Producción, sin precio ni costo). Antes esto capturaba una foto del Kanban
+// completo con html2pdf/html2canvas: salía como imagen, cortaba columnas al
+// cambiar de página y mezclaba etapas (Aprobado, Entregado) que un técnico no
+// necesita ver en la hoja del día. Ahora el PDF se arma en el backend con
+// ReportLab, mismo patrón que generarPDFCliente/generarPDFInterno.
 async function generarInformeDiarioPDF() {
-    const board = document.querySelector('.kanban-board');
-    // Ocultamos los botones de acción sólo durante la captura: no van en la hoja de ruta.
-    board.classList.add('ocultar-acciones');
     try {
-        await html2pdf().set({ margin: 10, filename: 'Hoja_Ruta.pdf', orientation: 'landscape' }).from(board).save();
-    } finally {
-        board.classList.remove('ocultar-acciones');
+        const resp = await fetch(`${API_URL}/trabajos/informe-diario/pdf`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, 'No se pudo generar la hoja de ruta.'));
+        }
+
+        const dispo = resp.headers.get('Content-Disposition') || '';
+        const match = dispo.match(/filename="?([^"]+)"?/);
+        const nombreArchivo = match ? match[1] : 'Hoja_de_Ruta.pdf';
+
+        const blob = await resp.blob();
+        const enlace = document.createElement('a');
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        URL.revokeObjectURL(enlace.href);
+    } catch (error) {
+        console.error('Error generando la hoja de ruta:', error);
+        Swal.fire('No se pudo generar la hoja de ruta', error.message, 'error');
     }
 }
 

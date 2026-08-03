@@ -224,19 +224,6 @@ tr:hover td { background: var(--magenta-soft); }
 .costo-row label { font-size: 13px; color: var(--ink); }
 .costo-row input { width: 120px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; text-align: right; }
 
-/* Oculta las acciones de las tarjetas sólo mientras se captura la hoja de ruta en PDF. */
-.kanban-board.ocultar-acciones .no-print { display: none !important; }
-
-/* La misma clase, que generarInformeDiarioPDF() pone y saca alrededor de la
-   captura, congela el tablero en sus cuatro columnas. Si no, con la ventana
-   angosta html2pdf fotografía el tablero tal como se ve —deslizable y con las
-   columnas fuera de cuadro— y la hoja de ruta sale cortada. */
-.kanban-board.ocultar-acciones {
-  grid-auto-flow: row !important;
-  grid-template-columns: repeat(4, 1fr) !important;
-  overflow: visible !important;
-}
-
 /* MANUAL DE USUARIO (Markdown renderizado con marked.js) */
 #manual-contenido { max-width: 820px; line-height: 1.6; }
 #manual-contenido h1 { font-size: 26px; margin-bottom: 8px; }

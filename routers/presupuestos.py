@@ -10,7 +10,7 @@ from auditoria import asentar, cambios
 from database import get_db
 from calculos import sumar_detalles_costos, calcular_saldo_trabajo
 from money import Q2
-from pdf import construir_presupuesto_pdf
+from pdf import construir_costos_pdf, construir_presupuesto_pdf
 from routers._comun import obtener_o_404
 from seguridad import solo_admin, usuario_actual
 # El papel del presupuesto se valida con las mismas reglas que el del trabajo
@@ -234,8 +234,8 @@ def informe_trabajos(db: Session = Depends(get_db)):
     return filas
 
 
-def _nombre_archivo_pdf(presupuesto: models.Presupuesto) -> str:
-    """Nombre de descarga: Presupuesto_<Cliente>_<dd-mm-aaaa>.pdf.
+def _nombre_archivo_pdf(presupuesto: models.Presupuesto, prefijo: str = "Presupuesto") -> str:
+    """Nombre de descarga: <prefijo>_<Cliente>_<dd-mm-aaaa>.pdf.
 
     Sanitiza el nombre del cliente igual que el frontend (sólo alfanumérico,
     lo demás a '_') para que sirva de nombre de archivo en cualquier sistema.
@@ -244,7 +244,7 @@ def _nombre_archivo_pdf(presupuesto: models.Presupuesto) -> str:
     crudo = cliente.nombre_completo if cliente else "SinCliente"
     limpio = re.sub(r"[^a-zA-Z0-9]+", "_", crudo).strip("_") or "SinCliente"
     fecha = presupuesto.fecha_creacion.strftime("%d-%m-%Y") if presupuesto.fecha_creacion else date.today().strftime("%d-%m-%Y")
-    return f"Presupuesto_{limpio}_{fecha}.pdf"
+    return f"{prefijo}_{limpio}_{fecha}.pdf"
 
 
 @router.get("/{presupuesto_id}/pdf-cliente")
@@ -261,6 +261,29 @@ def pdf_cliente(presupuesto_id: str, db: Session = Depends(get_db)):
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{_nombre_archivo_pdf(db_presupuesto)}"'},
+    )
+
+
+@router.get("/{presupuesto_id}/pdf-interno")
+def pdf_interno(presupuesto_id: str, db: Session = Depends(get_db)):
+    """Genera la hoja de costos internos (mismo patrón que pdf_cliente).
+
+    Reemplaza al armado con html2pdf en el navegador: sin paginación real, una
+    tabla de costos se cortaba a la mitad de una fila al pasar de página. Todo
+    el router es solo_admin, así que no hace falta un chequeo de rol extra acá:
+    el margen y los costos son justamente lo que no le corresponde ver a nadie
+    más que al dueño.
+    """
+    db_presupuesto = obtener_o_404(db, models.Presupuesto, presupuesto_id, "Presupuesto no encontrado")
+
+    pdf = construir_costos_pdf(db_presupuesto, db_presupuesto.cliente)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{_nombre_archivo_pdf(db_presupuesto, "Costos_Internos")}"'
+        },
     )
 
 
