@@ -2,3 +2,6 @@
 # requirements.txt es lo que necesita el sistema para correr.
 -r requirements.txt
 pytest==9.1.1
+# starlette.testclient (usado en tests/conftest.py) exige este paquete a partir
+# de la versión fijada en requirements.txt; sin él, pytest ni siquiera arranca.
+httpx2==2.9.1
