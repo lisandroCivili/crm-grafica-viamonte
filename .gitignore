@@ -7,6 +7,11 @@ __pycache__/
 *.db
 *.sqlite
 viamonte.db
+# Con journal_mode=WAL (ver database.py), SQLite guarda los cambios recientes
+# acá antes de volcarlos a viamonte.db: sin ignorarlos, un commit podría
+# versionar datos de producción que ni siquiera están en el .db todavía.
+*.db-wal
+*.db-shm
 
 # Copias de resguardo de la base (las que dejan las migraciones al correr)
 backups/
