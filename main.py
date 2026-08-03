@@ -48,7 +48,6 @@ ORIGENES_PERMITIDOS = [
     "http://127.0.0.1:5500",   # Live Server (variante 127.0.0.1)
     "http://localhost:8000",   # Backend local
     "http://127.0.0.1:8000",   # Backend local (127.0.0.1)
-    "null",                    # index.html abierto directamente como archivo (file://)
 ]
 
 # En Railway, agregar el dominio dinámicamente si existe
@@ -61,6 +60,9 @@ if RAILWAY_DOMAIN:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGENES_PERMITIDOS,
+    # El token viaja en el header Authorization, no en cookie: la API no
+    # necesita ni admite credenciales de navegador.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
