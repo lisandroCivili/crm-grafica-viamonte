@@ -65,13 +65,37 @@ def _sembrar(db: Session) -> list[str]:
         db.commit()
         creados.append(nombre)
 
-    marcos_db = db.query(models.Usuario).filter(models.Usuario.nombre == "marcos").first()
-    if marcos_db and marcos_db.rol != ROL_ADMIN:
-        marcos_db.rol = ROL_ADMIN
-        db.commit()
-        print("✅ Permisos de Marcos actualizados a ADMIN")
-
     return creados
+
+
+def promover_usuarios_por_entorno() -> None:
+    """Promueve a admin a los usuarios listados en PROMOVER_A_ADMIN."""
+    db = SessionLocal()
+    try:
+        _promover_por_entorno(db)
+    finally:
+        db.close()
+
+
+def _promover_por_entorno(db: Session) -> None:
+    """Promueve a admin a los usuarios listados en PROMOVER_A_ADMIN.
+
+    Formato: "marcos" o "marcos,lucio". Reemplaza al hardcode anterior (que
+    forzaba a Marcos a admin en cada arranque sin que se pudiera revertir sin
+    tocar el código): la variable se define una vez en Railway y desde ahí la
+    promoción queda igual de firme, pero si el día de mañana cambia de puesto,
+    alcanza con bajarlo desde la pantalla de usuarios y borrar la variable —
+    sin volver a tocar el código ni esperar otro deploy.
+    """
+    nombres = [n.strip().lower() for n in os.getenv("PROMOVER_A_ADMIN", "").split(",") if n.strip()]
+    if not nombres:
+        return
+
+    for usuario in db.query(models.Usuario).filter(models.Usuario.nombre.in_(nombres)).all():
+        if usuario.rol != ROL_ADMIN:
+            usuario.rol = ROL_ADMIN
+            print(f"Rol de {usuario.nombre} promovido a admin por PROMOVER_A_ADMIN.")
+    db.commit()
 
 
 def aplicar_migraciones_pendientes() -> None:

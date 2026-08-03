@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 
 import models
-from arranque import _migrar_columna_archivado, _migrar_entregas_legado, _sembrar
+from arranque import _migrar_columna_archivado, _migrar_entregas_legado, _promover_por_entorno, _sembrar
 from conftest import crear_cliente, crear_trabajo, crear_usuario
 from seguridad import verificar_password
 
@@ -82,6 +82,51 @@ def test_crea_solo_los_que_tienen_variable_definida(db, sin_claves, monkeypatch)
 
     assert _sembrar(db) == ["lucio"]
     assert db.query(models.Usuario).count() == 1
+
+
+# --- Promoción a admin por variable de entorno ------------------------------
+
+def test_promueve_a_admin_los_nombres_listados(db, monkeypatch):
+    monkeypatch.setenv("PROMOVER_A_ADMIN", "marcos")
+    crear_usuario(db, nombre="marcos", rol="encargado")
+
+    _promover_por_entorno(db)
+
+    marcos = db.query(models.Usuario).filter(models.Usuario.nombre == "marcos").first()
+    assert marcos.rol == "admin"
+
+
+def test_admite_varios_nombres_separados_por_coma(db, monkeypatch):
+    monkeypatch.setenv("PROMOVER_A_ADMIN", "marcos, lucio")
+    crear_usuario(db, nombre="marcos", rol="encargado")
+    crear_usuario(db, nombre="lucio", rol="mostrador")
+
+    _promover_por_entorno(db)
+
+    roles = {u.nombre: u.rol for u in db.query(models.Usuario).all()}
+    assert roles == {"marcos": "admin", "lucio": "admin"}
+
+
+def test_sin_la_variable_no_promueve_a_nadie(db, sin_claves):
+    """Si alguna vez se lo baja de rol y se borra la variable, un reinicio
+    no se lo tiene que revertir."""
+    crear_usuario(db, nombre="marcos", rol="encargado")
+
+    _promover_por_entorno(db)
+
+    marcos = db.query(models.Usuario).filter(models.Usuario.nombre == "marcos").first()
+    assert marcos.rol == "encargado"
+
+
+def test_promover_no_afecta_a_quien_no_esta_listado(db, monkeypatch):
+    monkeypatch.setenv("PROMOVER_A_ADMIN", "marcos")
+    crear_usuario(db, nombre="marcos", rol="encargado")
+    crear_usuario(db, nombre="lucio", rol="mostrador")
+
+    _promover_por_entorno(db)
+
+    lucio = db.query(models.Usuario).filter(models.Usuario.nombre == "lucio").first()
+    assert lucio.rol == "mostrador"
 
 
 # --- Migración de trabajos.archivado ----------------------------------------

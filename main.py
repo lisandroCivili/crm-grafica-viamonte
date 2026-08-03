@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from arranque import aplicar_migraciones_pendientes, sembrar_usuarios_iniciales
+from arranque import aplicar_migraciones_pendientes, promover_usuarios_por_entorno, sembrar_usuarios_iniciales
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
 from seguridad import solo_admin, usuario_actual
@@ -28,6 +28,10 @@ aplicar_migraciones_pendientes()
 _usuarios_creados = sembrar_usuarios_iniciales()
 if _usuarios_creados:
     print(f"Usuarios dados de alta en este arranque: {', '.join(_usuarios_creados)}")
+
+# Promueve a admin a quien esté listado en PROMOVER_A_ADMIN (ver arranque.py).
+# No pisa una baja de rol hecha a propósito salvo que la variable siga puesta.
+promover_usuarios_por_entorno()
 
 app = FastAPI(
     title="Gráfica Viamonte — API Local",
