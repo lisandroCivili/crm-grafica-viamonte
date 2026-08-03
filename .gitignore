@@ -34,8 +34,8 @@ venv/
 # PyInstaller (empaquetado del .exe)
 build/
 dist/
-*.spec
-# El .spec del proyecto SÍ se versiona: no es un artefacto de build sino la
-# configuración para generarlo (incluye datas de frontend/ y los hooks de
-# reportlab). Si se pierde, hay que reconstruirla a mano.
-!GraficaViamonte.spec
+# El .spec NO se ignora: no es un artefacto de build sino la configuración
+# para generarlo (incluye datas de frontend/ y los hooks de reportlab). Si se
+# pierde, hay que reconstruirla a mano. El proyecto genera uno solo
+# (GraficaViamonte.spec) y a mano, así que no hace falta la excepción de un
+# patrón *.spec que ignoraría en silencio cualquier .spec nuevo.
