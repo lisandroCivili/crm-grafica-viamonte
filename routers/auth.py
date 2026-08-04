@@ -19,7 +19,7 @@ import schemas
 from auditoria import asentar
 from database import get_db
 from models import ahora_local
-from seguridad import crear_token, usuario_actual, verificar_password
+from seguridad import crear_token, usuario_actual, verificar_password_constante
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -67,14 +67,19 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 
     usuario = db.query(models.Usuario).filter(models.Usuario.nombre == nombre).first()
 
+    # El checkpw se ejecuta SIEMPRE, exista o no el usuario (contra un hash
+    # señuelo si no existe): si se saltea con un cortocircuito, la respuesta
+    # vuelve varias veces más rápido cuando el nombre no existe, y eso delata
+    # qué usuarios son reales aunque el mensaje de abajo sea uno solo para los
+    # tres casos.
+    password_ok = verificar_password_constante(
+        data.password, usuario.password_hash if usuario else None
+    )
+
     # Un solo mensaje para los tres casos (no existe, contraseña mal, dado de
     # baja): distinguirlos le confirmaría a un desconocido qué nombres de
     # usuario existen de verdad.
-    if (
-        usuario is None
-        or not usuario.activo
-        or not verificar_password(data.password, usuario.password_hash)
-    ):
+    if usuario is None or not usuario.activo or not password_ok:
         # El intento queda asentado sin autor (no hay usuario al que apuntar) y
         # con el nombre tipeado como resumen. LA CONTRASEÑA NO SE GUARDA NUNCA,
         # ni siquiera cuando es evidente que fue un error de tipeo: el log se lee

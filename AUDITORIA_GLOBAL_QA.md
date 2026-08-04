@@ -609,7 +609,7 @@ Y un `POST /api/auth/logout` que haga `usuario.version_sesion += 1`.
 
 ---
 
-## M-03 — MEDIO · El token vive en `localStorage`
+## M-03 — MEDIO · El token vive en `localStorage` NO APLICAR
 
 **Dónde:** `frontend/js/core.js:119-124`.
 
@@ -627,7 +627,7 @@ principal desaparece.
 
 ---
 
-## M-04 — MEDIO · El JWT no valida audiencia, emisor ni exige `exp`
+## M-04 — MEDIO · El JWT no valida audiencia, emisor ni exige `exp` NO APLICAR
 
 **Dónde:** `seguridad.py:133`.
 
@@ -654,7 +654,7 @@ en cómo se emiten los tokens.
 
 ---
 
-## M-05 — MEDIO · `.secret_key` se escribe sin permisos restringidos
+## M-05 — MEDIO · `.secret_key` se escribe sin permisos restringidos NO APLICAR
 
 **Dónde:** `seguridad.py:59-62`.
 

@@ -87,6 +87,20 @@ def verificar_password(password: str, hash_guardado: str) -> bool:
         return False
 
 
+# Hash de una contraseña que nadie usa. Existe para gastar el mismo tiempo de
+# bcrypt cuando el usuario NO existe: sin esto, esa rama corta antes de llegar
+# a bcrypt y responde varias veces más rápido, lo que delata qué nombres de
+# usuario son reales aunque el login use un solo mensaje de error para los dos
+# casos (ver routers/auth.py).
+_HASH_SENUELO = hashear_password("contraseña que no le sirve a nadie")
+
+
+def verificar_password_constante(password: str, hash_guardado: str | None) -> bool:
+    """Como verificar_password, pero tarda lo mismo exista o no el usuario."""
+    coincide = verificar_password(password, hash_guardado or _HASH_SENUELO)
+    return coincide and hash_guardado is not None
+
+
 # ==========================================
 # TOKENS
 # ==========================================

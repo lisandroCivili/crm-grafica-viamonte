@@ -69,6 +69,27 @@ class TestLogin:
         assert login(client, "  MARCOS ", "secreta123").status_code == 200
 
 
+# --- Tiempo constante en el login (A-04) -------------------------------------
+
+class TestVerificarPasswordConstante:
+
+    def test_acepta_la_contrasena_correcta(self):
+        hash_guardado = seguridad.hashear_password("secreta123")
+
+        assert seguridad.verificar_password_constante("secreta123", hash_guardado) is True
+
+    def test_rechaza_la_contrasena_incorrecta(self):
+        hash_guardado = seguridad.hashear_password("secreta123")
+
+        assert seguridad.verificar_password_constante("otracosa", hash_guardado) is False
+
+    def test_rechaza_cuando_no_hay_hash_guardado(self):
+        """El caso de un usuario que no existe: no hay hash contra el que
+        comparar, pero igual corre bcrypt contra el señuelo (por eso tarda lo
+        mismo que si el usuario existiera)."""
+        assert seguridad.verificar_password_constante("cualquiera", None) is False
+
+
 # --- Bloqueo por intentos fallidos (A-03) ------------------------------------
 
 class TestBloqueoPorIntentosFallidos:

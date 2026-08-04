@@ -219,6 +219,14 @@ tr:hover td { background: var(--magenta-soft); }
 
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
 .modal-overlay.hidden { display: none; }
+
+/* El telón de login (#login-overlay, en index.html) tiene z-index: 9999 para
+   quedar por encima de toda la app. SweetAlert2 usa un z-index bajo (~1060)
+   pensado para tapar sólo el contenido normal: un Swal.fire() disparado desde
+   el login (ej. "Usuario o contraseña incorrectos") quedaba armado en el DOM
+   pero TAPADO por el telón, invisible hasta que el telón se ocultaba al
+   loguearse bien después. */
+.swal2-container { z-index: 10000 !important; }
 .modal-content { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
 .costo-row { display: flex; justify-content: space-between; align-items: center; }
 .costo-row label { font-size: 13px; color: var(--ink); }
