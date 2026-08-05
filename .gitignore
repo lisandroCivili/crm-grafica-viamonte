@@ -39,3 +39,11 @@ dist/
 # pierde, hay que reconstruirla a mano. El proyecto genera uno solo
 # (GraficaViamonte.spec) y a mano, así que no hace falta la excepción de un
 # patrón *.spec que ignoraría en silencio cualquier .spec nuevo.
+
+# Archivos generales que no deben subirse
+AUDITORIA_GLOBAL_QA.md
+auditoria.py
+calculos.py
+DEMO_SETUP.md
+poblar_base_ejemplo.py
+seguridad.py
