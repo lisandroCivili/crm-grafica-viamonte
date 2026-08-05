@@ -171,7 +171,6 @@ Este proyecto me permitió profundizar en:
 
 ## 🚧 Mejoras futuras
 
-- [ ] Autenticación con contraseña hasheada (actualmente básica)
 - [ ] Exportación a Excel de reportes
 - [ ] API pública para integraciones externas
 - [ ] Multiusuario con roles (admin, usuario, solo lectura)
@@ -189,5 +188,6 @@ GitHub: [@lisandrocivili](https://github.com/lisandrocivili)
 LinkedIn: [linkedin.com/in/lisandro-civili](https://www.linkedin.com/in/lisandro-civili)
 
 ---
-
+## ⏯️ Video DEMO
+Link a YouTube: https://youtu.be/irZCBNj5RYM
 **¿Preguntas o sugerencias?** Abrí un issue en el repo o contactame directamente.
