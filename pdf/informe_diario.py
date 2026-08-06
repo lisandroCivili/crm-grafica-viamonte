@@ -68,7 +68,7 @@ def _tabla_estado(trabajos):
     for t in trabajos:
         filas.append([
             texto(_identificador(t)),
-            Paragraph(texto(t.cliente.nombre_completo if t.cliente else None), estilo_celda),
+            Paragraph(texto((t.cliente.nombre_empresa or t.cliente.nombre_completo) if t.cliente else None), estilo_celda),
             Paragraph(texto(t.descripcion_producto), estilo_celda),
             str(t.cantidad),
             Paragraph(texto(_nombre_papel(t)), estilo_celda),
