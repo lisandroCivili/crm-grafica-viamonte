@@ -882,7 +882,7 @@ async function cargarTrabajos() {
               ${badgeArchivado}
               ${badgeSinPresu}
               ${badgeEntregaParcial}
-              <div class="client">${cliente ? esc(cliente.nombre_completo) : 'Desconocido'}</div>
+              <div class="client">${cliente ? esc(cliente.nombre_empresa || cliente.nombre_completo) : 'Desconocido'}</div>
               <div class="job">${t.cantidad}x ${esc(t.descripcion_producto)}</div>
               <div class="date">${t.fecha_creacion}${puedeVerPlata() ? ` - $${fmtMoney(t.precio_venta)}` : ''}</div>
               ${acciones}
