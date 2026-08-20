@@ -10,6 +10,7 @@ from .auditoria import AuditoriaResponse
 from .auth import LoginRequest, TokenResponse, UsuarioResponse
 from .clientes import ClienteBase, ClienteCreate, ClienteResponse, ClienteUpdate
 from .entregas import EntregaCreate, ItemEntregaCreate, ItemEntregaResponse
+from .archivos import ArchivoTrabajoResponse
 from .trabajos import (
     TrabajoBase,
     TrabajoCreate,

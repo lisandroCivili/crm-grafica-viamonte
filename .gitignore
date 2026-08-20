@@ -16,6 +16,11 @@ viamonte.db
 # Copias de resguardo de la base (las que dejan las migraciones al correr)
 backups/
 
+# Archivos adjuntos subidos desde el Kanban (fotos, PDFs de arte). Viven bajo
+# DIR_DATOS/uploads (ver archivos.py), la misma carpeta escribible que
+# viamonte.db: son datos de producción, no código ni assets del repo.
+uploads/
+
 # Entornos virtuales
 venv/
 .venv/

@@ -708,6 +708,110 @@ async function abrirModalEntregas(id) {
     }
 }
 
+// Modal de archivos adjuntos: lista lo ya subido (con "Ver" y "Borrar") y,
+// abajo, el selector de archivo(s) + botón para agregar más. Un solo modal
+// cubre ver + subir + borrar.
+async function abrirModalArchivos(id) {
+    const trabajos = await (await fetch(`${API_URL}/trabajos/`)).json();
+    const t = trabajos.find(x => x.id === id);
+    if (!t) { refrescarTablero(); return; }
+
+    const archivos = t.archivos || [];
+    const filasHtml = archivos.length
+        ? archivos.map(a => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #eee;">
+                <span style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(a.nombre_original)}">
+                    ${a.content_type === 'application/pdf' ? '📄' : '🖼️'} ${esc(a.nombre_original)}
+                </span>
+                <span style="display:flex; gap:4px; flex-shrink:0;">
+                    <button type="button" class="btn btn-mini" onclick="_verArchivoTrabajo('${id}','${a.id}')">👁️ Ver</button>
+                    <button type="button" class="btn btn-mini" onclick="_borrarArchivoTrabajo('${id}','${a.id}')">🗑️</button>
+                </span>
+            </div>
+        `).join('')
+        : '<p style="font-size:13px; color:var(--muted);">Todavía no se adjuntó ningún archivo.</p>';
+
+    const { value: files } = await Swal.fire({
+        title: 'Archivos del trabajo',
+        html: `<div style="text-align:left; max-height:260px; overflow-y:auto;">${filasHtml}</div>
+               <hr style="margin:10px 0;">
+               <input id="swal-input-archivos" type="file" class="swal2-file" multiple
+                      accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/*,application/pdf">`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Subir',
+        cancelButtonText: 'Cerrar',
+        preConfirm: () => {
+            const input = document.getElementById('swal-input-archivos');
+            if (!input.files.length) { Swal.showValidationMessage('Elegí al menos un archivo.'); return false; }
+            return input.files;
+        }
+    });
+
+    if (files) await _subirArchivosTrabajo(id, files);
+}
+
+// Trae el archivo protegido (el token no viaja en un <img src> ni en un link
+// directo: sólo el fetch parcheado de core.js lo inyecta) y lo abre en una
+// pestaña nueva. Sirve igual para imagen o PDF: el navegador lo renderiza
+// solo, a partir del content-type del blob.
+async function _verArchivoTrabajo(trabajoId, archivoId) {
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${trabajoId}/archivos/${archivoId}`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo abrir el archivo."));
+        }
+        window.open(URL.createObjectURL(await resp.blob()), '_blank');
+    } catch (error) {
+        Swal.fire('No se pudo abrir el archivo', error.message, 'error');
+    }
+}
+
+// FormData + fetch sin fijar Content-Type a mano: el browser arma el boundary
+// del multipart solo (pisarlo a mano rompe la subida).
+async function _subirArchivosTrabajo(trabajoId, files) {
+    try {
+        const formData = new FormData();
+        Array.from(files).forEach(f => formData.append('archivos', f));
+        const resp = await fetch(`${API_URL}/trabajos/${trabajoId}/archivos`, { method: 'POST', body: formData });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo subir el archivo."));
+        }
+        refrescarTablero();
+        abrirModalArchivos(trabajoId); // reabre con la lista actualizada
+    } catch (error) {
+        Swal.fire('No se pudo subir el archivo', error.message, 'error');
+    }
+}
+
+async function _borrarArchivoTrabajo(trabajoId, archivoId) {
+    const confirmacion = await Swal.fire({
+        title: '¿Borrar este archivo?',
+        text: 'Esta acción no se puede deshacer.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#555',
+        confirmButtonText: 'Sí, borrarlo',
+        cancelButtonText: 'Cancelar'
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    try {
+        const resp = await fetch(`${API_URL}/trabajos/${trabajoId}/archivos/${archivoId}`, { method: 'DELETE' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(detalleError(err, "No se pudo borrar el archivo."));
+        }
+        refrescarTablero();
+        abrirModalArchivos(trabajoId);
+    } catch (error) {
+        Swal.fire('No se pudo borrar el archivo', error.message, 'error');
+    }
+}
+
 // Registra una entrega de un solo trabajo (el caso simple del botón de la
 // tarjeta) y descarga su remito. Por debajo pega al mismo endpoint que la
 // entrega combinada de varios trabajos (ver clientes.js/confirmarNuevaEntrega),
@@ -856,9 +960,16 @@ async function cargarTrabajos() {
         const botonMover = (cancelado || archivado) ? '' :
             `<button class="btn btn-mini no-print solo-mobile" onclick="abrirMenuMover('${t.id}')">↔️ Mover a...</button>`;
 
+        // Botón de archivos adjuntos: aparece en cualquier estado (incluso
+        // cancelado) porque el arte de un trabajo sigue siendo útil aunque el
+        // trabajo ya no siga vivo.
+        const botonArchivos = `<button class="btn btn-mini no-print" onclick="abrirModalArchivos('${t.id}')">
+            ${(t.archivos && t.archivos.length) ? `📎 Archivos (${t.archivos.length})` : '📎 Adjuntar archivo'}
+          </button>`;
+
         // Un trabajo cancelado no se arrastra ni se reimprime: sólo se reactiva.
         const acciones = cancelado
-            ? `<button class="btn btn-mini no-print" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>${botonArchivar}`
+            ? `<button class="btn btn-mini no-print" onclick="reactivarTrabajo('${t.id}')">↩️ Reactivar</button>${botonArchivos}${botonArchivar}`
             : `${botonMover}
               <button class="btn btn-mini no-print" onclick="descargarOrden('${t.id}')">
                 ${t.orden_impresa ? '🖨️ Reimprimir orden' : '🖨️ Imprimir orden'}
@@ -866,6 +977,7 @@ async function cargarTrabajos() {
               <button class="btn btn-mini no-print" onclick="abrirModalEntregas('${t.id}')">
                 ${(t.entregas && t.entregas.length) ? '📦 Entregas / Remitos' : '🖨️ Registrar entrega'}
               </button>
+              ${botonArchivos}
               <button class="btn btn-mini no-print" onclick="cancelarTrabajo('${t.id}')">✖ Cancelar</button>${botonArchivar}`;
 
         // El archivado tampoco se arrastra: ya no está en el tablero, y moverlo

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from .comun import _validar_monto_no_negativo
 from .entregas import ItemEntregaResponse
+from .archivos import ArchivoTrabajoResponse
 
 # --- ESQUEMAS PARA TRABAJOS ---
 class TrabajoBase(BaseModel):
@@ -87,6 +88,8 @@ class TrabajoResponse(TrabajoBase):
     # a este trabajo (el remito puede haber combinado otros trabajos del
     # mismo cliente). Ver models.Entrega / models.ItemEntrega.
     entregas: list[ItemEntregaResponse] = []
+    # Archivos adjuntos (arte, fotos de referencia, PDFs): ver models.ArchivoTrabajo.
+    archivos: list[ArchivoTrabajoResponse] = []
     # Lo saca del tablero el endpoint /archivar, no un PUT: por eso va acá y no
     # en TrabajoBase. El Kanban lo lee para atenuar la tarjeta y ofrecer volverla.
     archivado: bool = False

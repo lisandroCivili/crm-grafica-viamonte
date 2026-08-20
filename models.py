@@ -137,6 +137,10 @@ class Trabajo(Base):
         "ItemEntrega", back_populates="trabajo",
         order_by="ItemEntrega.id",
     )
+    archivos = relationship(
+        "ArchivoTrabajo", back_populates="trabajo",
+        cascade="all, delete-orphan", order_by="ArchivoTrabajo.fecha_subida",
+    )
 
 class Entrega(Base):
     """Un remito: el papel que firma el cliente al retirar mercadería.
@@ -192,6 +196,28 @@ class ItemEntrega(Base):
     @property
     def fecha(self):
         return self.entrega.fecha
+
+
+class ArchivoTrabajo(Base):
+    """Un archivo (imagen o PDF) adjunto a un Trabajo. Sólo el metadata vive
+    acá — el archivo en sí se guarda en disco bajo DIR_DATOS/uploads/trabajos
+    (ver archivos.py), nunca en la base.
+
+    nombre_archivo es el nombre generado (uuid4 + extensión) con el que vive
+    en disco: nunca se usa el nombre que trae el navegador para el path
+    (riesgo de path traversal / colisión). nombre_original se guarda aparte
+    sólo para mostrarlo y como nombre de descarga.
+    """
+    __tablename__ = "archivos_trabajo"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    trabajo_id = Column(String, ForeignKey("trabajos.id"), nullable=False, index=True)
+    nombre_archivo = Column(String, nullable=False)
+    nombre_original = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    tamano_bytes = Column(Integer, nullable=False)
+    fecha_subida = Column(DateTime, default=ahora_local)
+
+    trabajo = relationship("Trabajo", back_populates="archivos")
 
 class Movimiento(Base):
     __tablename__ = "movimientos"

@@ -1,7 +1,8 @@
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 import models, schemas
 from database import get_db
 from datetime import date, datetime, timedelta, timezone
@@ -12,6 +13,12 @@ from papel import buscar_papel, validar_papel
 from pdf import construir_informe_diario_pdf, construir_orden_pdf
 from routers._comun import obtener_o_404
 from trabajos_comun import resumen_trabajo, saldo_pendiente_entrega
+from archivos import (
+    validar_tipo_archivo,
+    guardar_archivo_en_disco,
+    archivo_en_disco,
+    borrar_archivo_fisico,
+)
 from seguridad import (
     ROL_ADMIN,
     TODOS_LOS_ROLES,
@@ -382,7 +389,9 @@ def listar_trabajos(
     db: Session = Depends(get_db),
     usuario: models.Usuario = Depends(usuario_actual),
 ):
-    query = db.query(models.Trabajo)
+    # selectinload evita el N+1 de traer los archivos de cada trabajo con una
+    # query aparte por fila: son un round-trip extra por tarjeta del Kanban.
+    query = db.query(models.Trabajo).options(selectinload(models.Trabajo.archivos))
     # Filtro ideal para el Kanban (ej: traer solo los "En Diseño")
     if estado:
         query = query.filter(models.Trabajo.estado == estado)
@@ -649,6 +658,12 @@ def eliminar_trabajo(
     # único rastro que va a quedar de este trabajo.
     asentar(db, usuario, models.ACCION_BAJA, ENTIDAD, db_trabajo.id, resumen_trabajo(db_trabajo))
 
+    # cascade="all, delete-orphan" en Trabajo.archivos borra las FILAS solas al
+    # borrar el trabajo, pero no toca el disco: sin este loop quedarían
+    # archivos huérfanos en DIR_DATOS/uploads/trabajos para siempre.
+    for archivo in db_trabajo.archivos:
+        borrar_archivo_fisico(archivo.nombre_archivo)
+
     db.query(models.Nota).filter(models.Nota.trabajo_id == trabajo_id).update({"trabajo_id": None})
     db.delete(db_trabajo)
     db.commit()
@@ -849,5 +864,106 @@ def imprimir_orden(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="orden_{db_trabajo.numero_orden}.pdf"'},
     )
+
+
+@router.post("/{trabajo_id}/archivos", response_model=list[schemas.ArchivoTrabajoResponse])
+async def subir_archivos(
+    trabajo_id: str,
+    archivos: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
+    """Sube uno o varios archivos a un trabajo (botón "📎 Archivos" del Kanban).
+
+    Valida CADA archivo (extensión + content-type + tamaño) ANTES de escribir
+    ninguno a disco: una tanda entra entera o no entra nada, así el operador
+    no se queda con un adjunto a medio subir si el tercer archivo es inválido.
+    """
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
+
+    if not archivos:
+        raise HTTPException(status_code=400, detail="No se recibió ningún archivo.")
+
+    validados = []
+    for archivo in archivos:
+        extension = validar_tipo_archivo(archivo.filename, archivo.content_type)
+        contenido = await archivo.read()
+        validados.append((archivo.filename, archivo.content_type, extension, contenido))
+
+    nuevos = []
+    for nombre_original, content_type, extension, contenido in validados:
+        nombre_en_disco = guardar_archivo_en_disco(contenido, extension, nombre_original)
+        fila = models.ArchivoTrabajo(
+            trabajo_id=trabajo_id,
+            nombre_archivo=nombre_en_disco,
+            nombre_original=nombre_original,
+            content_type=content_type,
+            tamano_bytes=len(contenido),
+        )
+        db.add(fila)
+        nuevos.append(fila)
+
+    db.flush()
+    nombres = ", ".join(f.nombre_original for f in nuevos)
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id, resumen_trabajo(db_trabajo),
+            f"adjuntó {len(nuevos)} archivo(s): {nombres}")
+    db.commit()
+    for f in nuevos:
+        db.refresh(f)
+    return nuevos
+
+
+@router.get("/{trabajo_id}/archivos/{archivo_id}")
+def ver_archivo(
+    trabajo_id: str,
+    archivo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
+    """Sirve el archivo. Protegido igual que el resto del router (token en
+    Authorization) — por eso el frontend NO puede usar un <img src> ni un link
+    directo: tiene que traerlo con fetch + blob (ver _verArchivoTrabajo en
+    frontend/js/trabajos.js).
+    """
+    obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
+    archivo = (
+        db.query(models.ArchivoTrabajo)
+        .filter(models.ArchivoTrabajo.id == archivo_id, models.ArchivoTrabajo.trabajo_id == trabajo_id)
+        .first()
+    )
+    if not archivo:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    ruta = archivo_en_disco(archivo.nombre_archivo)
+    if not ruta:
+        raise HTTPException(status_code=404, detail="El archivo ya no está disponible en el servidor.")
+
+    return FileResponse(ruta, media_type=archivo.content_type, filename=archivo.nombre_original)
+
+
+@router.delete("/{trabajo_id}/archivos/{archivo_id}")
+def borrar_archivo(
+    trabajo_id: str,
+    archivo_id: str,
+    db: Session = Depends(get_db),
+    usuario: models.Usuario = Depends(usuario_actual),
+):
+    """Borra un archivo adjunto: la fila y el físico en disco. Si el físico ya
+    no está, igual borra la fila: la base es la fuente de verdad."""
+    db_trabajo = obtener_o_404(db, models.Trabajo, trabajo_id, "Trabajo no encontrado")
+    archivo = (
+        db.query(models.ArchivoTrabajo)
+        .filter(models.ArchivoTrabajo.id == archivo_id, models.ArchivoTrabajo.trabajo_id == trabajo_id)
+        .first()
+    )
+    if not archivo:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    borrar_archivo_fisico(archivo.nombre_archivo)
+    asentar(db, usuario, models.ACCION_EDICION, ENTIDAD, trabajo_id, resumen_trabajo(db_trabajo),
+            f"borró archivo '{archivo.nombre_original}'")
+    db.delete(archivo)
+    db.commit()
+    return {"mensaje": "Archivo eliminado"}
 
 
