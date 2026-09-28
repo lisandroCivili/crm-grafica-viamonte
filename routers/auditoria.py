@@ -15,12 +15,12 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
-from seguridad import solo_admin
+from seguridad import seccion_disponible, solo_admin
 
 router = APIRouter(
     prefix="/api/auditoria",
     tags=["Auditoría"],
-    dependencies=[Depends(solo_admin)],
+    dependencies=[Depends(solo_admin), Depends(seccion_disponible("auditoria"))],
 )
 
 # Cuántas filas trae una consulta sin pedir nada en particular: entra en una

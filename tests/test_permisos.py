@@ -245,7 +245,7 @@ class TestFlujoDelTaller:
 
 # --- Bloqueo temporal de secciones -------------------------------------------
 
-BLOQUEO = "dashboard,trabajos,presupuestos,cheques,clientes"
+BLOQUEO = "dashboard,trabajos,presupuestos,cheques,clientes,auditoria"
 
 # (path, rol que normalmente SÍ entra). Con el bloqueo puesto tienen que dar
 # 503 aunque el rol alcance: el bloqueo vale para todos.
@@ -256,6 +256,7 @@ APAGADAS = [
     ("/api/presupuestos/",      ADMIN),
     ("/api/cheques/",           ADMIN),
     ("/api/reportes/dashboard", ADMIN),
+    ("/api/auditoria/",         ADMIN),
 ]
 
 # Routers sin un GET de listado: el bloqueo corta antes de buscar el id, así
@@ -269,7 +270,6 @@ SIGUEN_ANDANDO = [
     ("/api/stock/",              MOSTRADOR),
     ("/api/gastos/",             MOSTRADOR),
     ("/api/asistencia/planilla", ENCARGADO),
-    ("/api/auditoria/",          ADMIN),
     ("/api/backup",              ADMIN),
 ]
 
@@ -344,12 +344,13 @@ class TestBloqueoTemporal:
 
     # --- La página a la que va el navegador al tocar una pestaña apagada ---
 
-    def test_la_pagina_de_una_seccion_apagada_es_un_502(self, client, db, monkeypatch):
+    @pytest.mark.parametrize("seccion", BLOQUEO.split(","))
+    def test_la_pagina_de_una_seccion_apagada_es_un_502(self, client, db, monkeypatch, seccion):
         """Sin token: es una navegación del navegador, no un fetch de la API."""
         monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
         del client.headers["Authorization"]
 
-        r = client.get("/clientes")
+        r = client.get(f"/{seccion}")
 
         assert r.status_code == 502
         assert "502 Bad Gateway" in r.text

@@ -190,7 +190,7 @@ solo_admin = requiere_rol(ROL_ADMIN)
 
 # Las que se pueden apagar: cada una tiene su seccion_disponible() en los
 # routers que la sirven y su página de 502 en main.py.
-SECCIONES_BLOQUEABLES = ["dashboard", "trabajos", "presupuestos", "cheques", "clientes"]
+SECCIONES_BLOQUEABLES = ["dashboard", "trabajos", "presupuestos", "cheques", "clientes", "auditoria"]
 
 
 def secciones_no_disponibles() -> list[str]:
