@@ -19,7 +19,7 @@ import schemas
 from auditoria import asentar
 from database import get_db
 from models import ahora_local
-from seguridad import crear_token, usuario_actual, verificar_password_constante
+from seguridad import crear_token, secciones_no_disponibles, usuario_actual, verificar_password_constante
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -101,7 +101,7 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(usuario)
 
-    return schemas.TokenResponse(access_token=crear_token(usuario), usuario=usuario)
+    return schemas.TokenResponse(access_token=crear_token(usuario), usuario=_datos_de_sesion(usuario))
 
 
 @router.get("/me", response_model=schemas.UsuarioResponse)
@@ -112,4 +112,12 @@ def datos_de_la_sesion(usuario: models.Usuario = Depends(usuario_actual)):
     hay que volver a mostrar el login en vez de arrancar una app que no va a
     poder pedir ningún dato.
     """
-    return usuario
+    return _datos_de_sesion(usuario)
+
+
+def _datos_de_sesion(usuario: models.Usuario) -> schemas.UsuarioResponse:
+    """El usuario más las secciones apagadas con BLOQUEO_TEMPORAL, para que el
+    frontend arme la pantalla sabiendo qué pestañas no van a responder."""
+    datos = schemas.UsuarioResponse.model_validate(usuario)
+    datos.secciones_no_disponibles = secciones_no_disponibles()
+    return datos

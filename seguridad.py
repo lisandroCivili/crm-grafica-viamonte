@@ -182,3 +182,45 @@ def requiere_rol(*roles: str):
 TODOS_LOS_ROLES = (ROL_ADMIN, ROL_ENCARGADO, ROL_MOSTRADOR)
 
 solo_admin = requiere_rol(ROL_ADMIN)
+
+
+# ==========================================
+# BLOQUEO TEMPORAL DE SECCIONES
+# ==========================================
+
+# Las que se pueden apagar: cada una tiene su seccion_disponible() en los
+# routers que la sirven y su página de 502 en main.py.
+SECCIONES_BLOQUEABLES = ["dashboard", "trabajos", "presupuestos", "cheques", "clientes"]
+
+
+def secciones_no_disponibles() -> list[str]:
+    """Secciones apagadas con la variable de entorno BLOQUEO_TEMPORAL.
+
+    Formato: "clientes,cheques". Son los nombres de las pestañas del frontend
+    sin el "tab-" (ver index.html). Vale para TODOS los usuarios, sea cual sea
+    su rol. Es para un período puntual (el dueño de viaje, por ejemplo): se
+    define en Railway y al borrarla todo vuelve a la normalidad sin tocar
+    código. Se lee en cada pedido y no al arrancar para que los tests puedan
+    cambiarla.
+    """
+    return [s.strip().lower() for s in os.getenv("BLOQUEO_TEMPORAL", "").split(",") if s.strip()]
+
+
+def seccion_disponible(seccion: str):
+    """Dependency que rechaza los pedidos a una sección apagada por BLOQUEO_TEMPORAL.
+
+    Responde 503 y no 403 a propósito: quien usa el sistema tiene que leerlo
+    como una falla de conexión, no como "no tenés permiso". Pide usuario_actual
+    para que un pedido sin token siga siendo 401, como en el resto de la API.
+    Se declara en el router, después del chequeo de rol:
+
+        router = APIRouter(dependencies=[Depends(solo_admin), Depends(seccion_disponible("cheques"))])
+    """
+    def verificar(_: models.Usuario = Depends(usuario_actual)) -> None:
+        if seccion in secciones_no_disponibles():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo conectar con el servicio. Intentá de nuevo más tarde.",
+            )
+
+    return verificar

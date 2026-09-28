@@ -3,13 +3,13 @@ import os
 from datetime import datetime
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from arranque import aplicar_migraciones_pendientes, promover_usuarios_por_entorno, sembrar_usuarios_iniciales
 from database import engine, BASE_DIR
 from rutas import ruta_recurso
-from seguridad import solo_admin, usuario_actual
+from seguridad import SECCIONES_BLOQUEABLES, secciones_no_disponibles, solo_admin, usuario_actual
 # Importamos todos los routers modulares que creamos
 from routers import clientes, trabajos, entregas, cheques, gastos, presupuestos, stock, movimientos, notas, auth, reportes, empleados, asistencia, auditoria
 
@@ -156,6 +156,41 @@ def obtener_manual():
         raise HTTPException(status_code=404, detail="Manual no encontrado")
     with open(ruta_manual, "r", encoding="utf-8") as f:
         return f.read()
+
+
+# ==========================================
+# BLOQUEO TEMPORAL: LA PÁGINA DE UNA SECCIÓN APAGADA
+# ==========================================
+# Con BLOQUEO_TEMPORAL (ver seguridad.py), tocar la pestaña de una sección
+# apagada saca al navegador del sistema hacia /<seccion> (ver switchTab en
+# ui.js). Acá se contesta la página de "502 Bad Gateway" que muestra cualquier
+# proxy cuando el servidor de atrás no responde: tiene que leerse como una
+# caída, no como un bloqueo. Sin token a propósito: una navegación del
+# navegador no lleva el header Authorization, y esto no devuelve ningún dato.
+# Sin la variable, 404 como cualquier dirección que no existe.
+PAGINA_502 = """<html>
+<head><title>502 Bad Gateway</title></head>
+<body>
+<center><h1>502 Bad Gateway</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>
+"""
+
+
+def _pagina_de_seccion(seccion: str):
+    def responder():
+        if seccion not in secciones_no_disponibles():
+            raise HTTPException(status_code=404, detail="Not Found")
+        return HTMLResponse(PAGINA_502, status_code=502, headers={"Cache-Control": "no-store"})
+
+    return responder
+
+
+# Una ruta por sección y no un "/{seccion}" genérico: ese atraparía también
+# /style.css y el resto de los archivos del frontend.
+for _seccion in SECCIONES_BLOQUEABLES:
+    app.add_api_route(f"/{_seccion}", _pagina_de_seccion(_seccion), methods=["GET"], include_in_schema=False)
 
 
 # ==========================================

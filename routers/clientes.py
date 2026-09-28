@@ -7,7 +7,7 @@ from auditoria import asentar, cambios
 from database import get_db
 from calculos import calcular_saldo_cliente
 from routers._comun import obtener_o_404
-from seguridad import TODOS_LOS_ROLES, requiere_rol, solo_admin, usuario_actual
+from seguridad import TODOS_LOS_ROLES, requiere_rol, seccion_disponible, solo_admin, usuario_actual
 import uuid
 
 # Instanciamos el router específico para Clientes.
@@ -17,7 +17,7 @@ import uuid
 router = APIRouter(
     prefix="/api/clientes",
     tags=["Clientes"],
-    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES)), Depends(seccion_disponible("clientes"))],
 )
 
 # Cómo se llama esta entidad en el registro de auditoría.

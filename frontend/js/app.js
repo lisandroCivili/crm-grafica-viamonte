@@ -58,13 +58,21 @@ function aplicarPermisos() {
     }
 }
 
+// Una pestaña en la que se puede arrancar: la ve este puesto y no esta apagada.
+function puedeAbrirAlInicio(tabId) {
+    return puedeVerPestana(tabId) && !seccionNoDisponible(tabId);
+}
+
 // La ultima pestaña abierta, salvo que sea una que este puesto ya no ve (o que
-// nunca vio: el default historico es el Dashboard, que es solo del dueño).
+// nunca vio: el default historico es el Dashboard, que es solo del dueño). Nunca
+// una apagada: el sistema arrancaria saltando directo a la pagina de 502, y al
+// volver "Atras" caeria otra vez en lo mismo.
 function abrirPestanaInicial() {
     const guardada = localStorage.getItem('viamonte_last_tab');
-    const primeraPropia = document.querySelector('.nav-item[data-tab]:not([style*="none"])');
+    const primeraPropia = [...document.querySelectorAll('.nav-item[data-tab]')]
+        .find(item => puedeAbrirAlInicio(item.dataset.tab));
 
-    const tabId = (guardada && puedeVerPestana(guardada)) ? guardada : primeraPropia?.dataset.tab;
+    const tabId = (guardada && puedeAbrirAlInicio(guardada)) ? guardada : primeraPropia?.dataset.tab;
     if (!tabId) return;
 
     const boton = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
@@ -158,10 +166,11 @@ async function descargarRespaldo(button) {
 // Todo se carga de una al entrar (switchTab solo muestra y esconde secciones ya
 // cargadas), pero cada carga esta atada a la pestaña a la que pertenece: pedir
 // el dashboard o los cheques con un puesto que no los tiene serian 403 y la
-// consola llena de errores rojos.
+// consola llena de errores rojos. Las apagadas con BLOQUEO_TEMPORAL tampoco se
+// piden: el backend las rechaza y saltarian carteles de error al entrar.
 function iniciarApp() {
     const siPuede = (tabId, ...cargas) => {
-        if (puedeVerPestana(tabId)) cargas.forEach(cargar => cargar());
+        if (puedeVerPestana(tabId) && !seccionNoDisponible(tabId)) cargas.forEach(cargar => cargar());
     };
 
     siPuede('tab-clientes', cargarClientes);

@@ -19,12 +19,12 @@ from database import get_db
 from pdf import construir_entrega_pdf
 from routers._comun import obtener_o_404
 from trabajos_comun import resumen_trabajo, saldo_pendiente_entrega
-from seguridad import TODOS_LOS_ROLES, requiere_rol, usuario_actual
+from seguridad import TODOS_LOS_ROLES, requiere_rol, seccion_disponible, usuario_actual
 
 router = APIRouter(
     prefix="/api/entregas",
     tags=["Entregas"],
-    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES)), Depends(seccion_disponible("trabajos"))],
 )
 
 # Se audita por cada Trabajo tocado (entra en su propia historia), no por el

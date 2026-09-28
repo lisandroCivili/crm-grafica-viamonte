@@ -11,13 +11,13 @@ from calculos import (
     ingresos_reales, ingresos_sin_imputar, ganancia_bruta_realizada,
     total_gastos, total_gastos_operativos, calcular_saldo_trabajo,
 )
-from seguridad import solo_admin
+from seguridad import seccion_disponible, solo_admin
 
 # Módulo entero del dueño: ingresos, egresos, ganancia neta y morosos.
 router = APIRouter(
     prefix="/api/reportes",
     tags=["Reportes"],
-    dependencies=[Depends(solo_admin)],
+    dependencies=[Depends(solo_admin), Depends(seccion_disponible("dashboard"))],
 )
 
 # Trabajos que siguen "vivos" en el taller (no entregados ni cancelados).

@@ -199,6 +199,14 @@ function puedeVerPlata() {
     return permisos().plata;
 }
 
+// Pestañas apagadas por el backend con BLOQUEO_TEMPORAL (ver seguridad.py),
+// para todos los puestos. No se esconden del menu: al tocarlas, el navegador va
+// a una pagina de "502 Bad Gateway" (ver switchTab en ui.js).
+function seccionNoDisponible(tabId) {
+    const apagadas = usuarioActual?.secciones_no_disponibles ?? [];
+    return apagadas.includes(tabId.replace(/^tab-/, ''));
+}
+
 // ==========================================
 // HELPER: DISABLE ON SUBMIT
 // ==========================================

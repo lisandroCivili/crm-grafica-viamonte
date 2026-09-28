@@ -1,6 +1,14 @@
 // Navegacion: pestanas, drawers y acordeones.
 
 function switchTab(tabId, element) {
+    // Seccion apagada con BLOQUEO_TEMPORAL: el navegador sale del sistema a la
+    // pagina de "502 Bad Gateway" que contesta el backend (ver main.py), para
+    // que se lea como una caida del servidor y no como un bloqueo.
+    if (seccionNoDisponible(tabId)) {
+        location.href = `/${tabId.replace(/^tab-/, '')}`;
+        return;
+    }
+
     document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     document.getElementById(tabId).classList.add('active');

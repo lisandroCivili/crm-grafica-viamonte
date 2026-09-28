@@ -4,13 +4,13 @@ import models, schemas
 from auditoria import asentar
 from database import get_db
 from routers._comun import obtener_o_404
-from seguridad import solo_admin, usuario_actual
+from seguridad import seccion_disponible, solo_admin, usuario_actual
 
 # Módulo entero del dueño: cartera de cheques, bancos y montos.
 router = APIRouter(
     prefix="/api/cheques",
     tags=["Cheques"],
-    dependencies=[Depends(solo_admin)],
+    dependencies=[Depends(solo_admin), Depends(seccion_disponible("cheques"))],
 )
 
 # Cómo se llama esta entidad en el registro de auditoría.

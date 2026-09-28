@@ -23,6 +23,7 @@ from seguridad import (
     ROL_ADMIN,
     TODOS_LOS_ROLES,
     requiere_rol,
+    seccion_disponible,
     solo_admin,
     usuario_actual,
 )
@@ -34,7 +35,7 @@ from seguridad import (
 router = APIRouter(
     prefix="/api/trabajos",
     tags=["Trabajos"],
-    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES)), Depends(seccion_disponible("trabajos"))],
 )
 
 # Los dos campos que no ve el taller. Juntos dan el margen de cada trabajo.

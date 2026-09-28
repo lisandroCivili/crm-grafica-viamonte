@@ -4,7 +4,7 @@ import models, schemas
 from auditoria import asentar, cambios
 from database import get_db
 from routers._comun import obtener_o_404
-from seguridad import TODOS_LOS_ROLES, requiere_rol, usuario_actual
+from seguridad import TODOS_LOS_ROLES, requiere_rol, seccion_disponible, usuario_actual
 
 # Entran los tres puestos: las notas son los post-it de la ficha del cliente
 # ("llamar antes de entregar", "pidió que le avisen cuando esté"), no un
@@ -12,7 +12,7 @@ from seguridad import TODOS_LOS_ROLES, requiere_rol, usuario_actual
 router = APIRouter(
     prefix="/api/notas",
     tags=["Notas"],
-    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES))],
+    dependencies=[Depends(requiere_rol(*TODOS_LOS_ROLES)), Depends(seccion_disponible("clientes"))],
 )
 
 # Cómo se llama esta entidad en el registro de auditoría.

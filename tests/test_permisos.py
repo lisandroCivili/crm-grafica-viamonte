@@ -241,3 +241,133 @@ class TestFlujoDelTaller:
         )
 
         assert r.status_code == 200
+
+
+# --- Bloqueo temporal de secciones -------------------------------------------
+
+BLOQUEO = "dashboard,trabajos,presupuestos,cheques,clientes"
+
+# (path, rol que normalmente SÍ entra). Con el bloqueo puesto tienen que dar
+# 503 aunque el rol alcance: el bloqueo vale para todos.
+APAGADAS = [
+    ("/api/clientes/",          MOSTRADOR),
+    ("/api/movimientos/",       ADMIN),
+    ("/api/trabajos/",          MOSTRADOR),
+    ("/api/presupuestos/",      ADMIN),
+    ("/api/cheques/",           ADMIN),
+    ("/api/reportes/dashboard", ADMIN),
+]
+
+# Routers sin un GET de listado: el bloqueo corta antes de buscar el id, así
+# que alcanza con uno inexistente.
+APAGADAS_SIN_LISTADO = [
+    ("/api/notas/id-inexistente",            ADMIN),
+    ("/api/entregas/id-inexistente/pdf",     ADMIN),
+]
+
+SIGUEN_ANDANDO = [
+    ("/api/stock/",              MOSTRADOR),
+    ("/api/gastos/",             MOSTRADOR),
+    ("/api/asistencia/planilla", ENCARGADO),
+    ("/api/auditoria/",          ADMIN),
+    ("/api/backup",              ADMIN),
+]
+
+
+class TestBloqueoTemporal:
+
+    @pytest.mark.parametrize("path,rol", APAGADAS + APAGADAS_SIN_LISTADO)
+    def test_las_secciones_apagadas_dan_503_para_cualquier_rol(self, client, db, monkeypatch, path, rol):
+        """503 y no 403: tiene que leerse como una falla de conexión."""
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+
+        r = client.get(path, headers=cabecera_rol(db, rol))
+
+        assert r.status_code == 503
+
+    @pytest.mark.parametrize("path,rol", SIGUEN_ANDANDO)
+    def test_el_resto_sigue_andando(self, client, db, monkeypatch, path, rol):
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+
+        r = client.get(path, headers=cabecera_rol(db, rol))
+
+        assert r.status_code == 200
+
+    def test_sin_token_sigue_siendo_401(self, client, db, monkeypatch):
+        """Si diera 503, el frontend no volvería a pedir usuario y contraseña."""
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+        del client.headers["Authorization"]
+
+        assert client.get("/api/clientes/").status_code == 401
+
+    def test_el_permiso_de_rol_se_sigue_chequeando(self, client, db, monkeypatch):
+        """El bloqueo se suma al rol, no lo reemplaza."""
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", "trabajos")
+
+        r = client.get("/api/cheques/", headers=cabecera_rol(db, MOSTRADOR))
+
+        assert r.status_code == 403
+
+    @pytest.mark.parametrize("path,rol", APAGADAS)
+    def test_sin_la_variable_todo_como_siempre(self, client, db, monkeypatch, path, rol):
+        monkeypatch.delenv("BLOQUEO_TEMPORAL", raising=False)
+
+        r = client.get(path, headers=cabecera_rol(db, rol))
+
+        assert r.status_code == 200
+
+    def test_me_informa_las_secciones_apagadas(self, client, db, monkeypatch):
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", " Clientes, cheques ,")
+
+        r = client.get("/api/auth/me", headers=cabecera_rol(db, MOSTRADOR))
+
+        assert r.status_code == 200
+        assert r.json()["secciones_no_disponibles"] == ["clientes", "cheques"]
+
+    def test_el_login_informa_las_secciones_apagadas(self, client, db, monkeypatch):
+        from conftest import crear_usuario
+
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+        crear_usuario(db, nombre="facundo", password="clave1234")
+
+        r = client.post("/api/auth/login", json={"usuario": "facundo", "password": "clave1234"})
+
+        assert r.status_code == 200
+        assert r.json()["usuario"]["secciones_no_disponibles"] == BLOQUEO.split(",")
+
+    def test_sin_bloqueo_la_lista_viene_vacia(self, client, db, monkeypatch):
+        monkeypatch.delenv("BLOQUEO_TEMPORAL", raising=False)
+
+        r = client.get("/api/auth/me")
+
+        assert r.json()["secciones_no_disponibles"] == []
+
+    # --- La página a la que va el navegador al tocar una pestaña apagada ---
+
+    def test_la_pagina_de_una_seccion_apagada_es_un_502(self, client, db, monkeypatch):
+        """Sin token: es una navegación del navegador, no un fetch de la API."""
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+        del client.headers["Authorization"]
+
+        r = client.get("/clientes")
+
+        assert r.status_code == 502
+        assert "502 Bad Gateway" in r.text
+
+    def test_una_seccion_que_no_esta_apagada_no_tiene_pagina(self, client, db, monkeypatch):
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", "cheques")
+
+        assert client.get("/clientes").status_code == 404
+
+    def test_sin_la_variable_esas_direcciones_no_existen(self, client, db, monkeypatch):
+        monkeypatch.delenv("BLOQUEO_TEMPORAL", raising=False)
+
+        assert client.get("/clientes").status_code == 404
+
+    def test_el_frontend_se_sigue_sirviendo_con_el_bloqueo(self, client, db, monkeypatch):
+        """Las páginas de 502 no pueden tapar index.html ni sus archivos."""
+        monkeypatch.setenv("BLOQUEO_TEMPORAL", BLOQUEO)
+
+        assert client.get("/").status_code == 200
+        assert client.get("/style.css").status_code == 200
+        assert client.get("/js/ui.js").status_code == 200

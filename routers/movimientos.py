@@ -6,7 +6,7 @@ from auditoria import asentar, cambios
 from database import get_db
 from calculos import calcular_saldo_cliente, metodo_es_cheque
 from routers._comun import obtener_o_404
-from seguridad import solo_admin, usuario_actual
+from seguridad import seccion_disponible, solo_admin, usuario_actual
 
 # Módulo entero del dueño: es la cuenta corriente de los clientes (qué se
 # cobró, qué se debe). Es lo que hace que la ficha del cliente no muestre saldo
@@ -14,7 +14,7 @@ from seguridad import solo_admin, usuario_actual
 router = APIRouter(
     prefix="/api/movimientos",
     tags=["Movimientos"],
-    dependencies=[Depends(solo_admin)],
+    dependencies=[Depends(solo_admin), Depends(seccion_disponible("clientes"))],
 )
 
 # Un pago con cheque se registra como Cheque, no como Movimiento: si entrara por

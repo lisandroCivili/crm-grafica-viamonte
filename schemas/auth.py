@@ -14,6 +14,9 @@ class UsuarioResponse(BaseModel):
     id: str
     nombre: str
     rol: str
+    # Pestañas apagadas con BLOQUEO_TEMPORAL (ver seguridad.py): el frontend
+    # muestra un aviso de error ahí en vez de pedir datos que se van a rechazar.
+    secciones_no_disponibles: list[str] = []
 
     model_config = {"from_attributes": True}
 

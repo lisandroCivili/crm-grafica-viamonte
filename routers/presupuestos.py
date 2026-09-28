@@ -12,7 +12,7 @@ from calculos import sumar_detalles_costos, calcular_saldo_trabajo
 from money import Q2
 from pdf import construir_costos_pdf, construir_presupuesto_pdf
 from routers._comun import obtener_o_404
-from seguridad import solo_admin, usuario_actual
+from seguridad import seccion_disponible, solo_admin, usuario_actual
 # El papel del presupuesto se valida con las mismas reglas que el del trabajo
 # (que exista, que se mida en pliegos, que la cantidad sea un entero positivo y
 # que papel y pliegos vayan juntos). Vive en papel.py, un módulo compartido, para
@@ -27,7 +27,7 @@ from papel import validar_papel
 router = APIRouter(
     prefix="/api/presupuestos",
     tags=["Presupuestos"],
-    dependencies=[Depends(solo_admin)],
+    dependencies=[Depends(solo_admin), Depends(seccion_disponible("presupuestos"))],
 )
 
 
