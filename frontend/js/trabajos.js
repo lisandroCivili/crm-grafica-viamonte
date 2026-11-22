@@ -245,7 +245,8 @@ async function cargarSelectorClientes() {
     const selector = document.getElementById('ft_cliente_id');
     if(!selector) return;
     selector.innerHTML = '<option value="">Seleccione un cliente...</option>';
-    clientes.forEach(c => selector.innerHTML += `<option value="${c.id}">${esc(c.nombre_completo)}</option>`);
+    clientes.sort((a, b) => nombreMarca(a).localeCompare(nombreMarca(b)))
+        .forEach(c => selector.innerHTML += `<option value="${c.id}">${esc(opcionCliente(c))}</option>`);
     cargarSelectoresPapel();
 }
 

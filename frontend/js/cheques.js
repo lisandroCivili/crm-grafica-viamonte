@@ -32,9 +32,8 @@ async function abrirDrawerCheque() {
             const clientes = await resp.json();
             const select = document.getElementById('fch_cliente');
             select.innerHTML = '<option value="">Seleccionar Cliente...</option>';
-            clientes.forEach(c => {
-                select.innerHTML += `<option value="${c.id}">${c.nombre_completo || c.nombre || 'Sin nombre'}</option>`;
-            });
+            clientes.sort((a, b) => nombreMarca(a).localeCompare(nombreMarca(b)))
+                .forEach(c => select.innerHTML += `<option value="${c.id}">${esc(opcionCliente(c))}</option>`);
         }
     } catch(e) { console.error(e); }
 
@@ -122,6 +121,7 @@ async function cargarCheques() {
         if (!respC.ok) return;
         const cheques = await respC.json();
         const clientes = await respCl.json();
+        renderCalendarioCheques(cheques, clientes);
         
         const tbody = document.querySelector('#tableCheques tbody');
         if (!tbody) return;
@@ -137,7 +137,7 @@ async function cargarCheques() {
             const cliente = clientes.find(c => c.id === ch.cliente_id);
             // Recibido: nombre del cliente emisor. Emitido: a quién se le entregó.
             const nombreParte = esRecibido
-                ? (cliente ? (cliente.nombre_completo || cliente.nombre || 'Desconocido') : 'Desconocido')
+                ? (cliente ? nombreMarca(cliente) : 'Desconocido')
                 : (ch.destinatario_endoso || 'Proveedor');
 
             const badgeTipo = esRecibido

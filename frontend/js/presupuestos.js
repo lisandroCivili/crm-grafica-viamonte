@@ -179,7 +179,8 @@ async function abrirDrawerPresupuesto() {
         const clientes = await resp.json();
         const select = document.getElementById('mp_cliente_id');
         select.innerHTML = '<option value="">Sin cliente (borrador)</option>';
-        clientes.forEach(c => select.innerHTML += `<option value="${c.id}">${esc(c.nombre_completo)}</option>`);
+        clientes.sort((a, b) => nombreMarca(a).localeCompare(nombreMarca(b)))
+            .forEach(c => select.innerHTML += `<option value="${c.id}">${esc(opcionCliente(c))}</option>`);
     } catch (e) { console.error(e); }
 
     // Trabajos que todavía no tienen presupuesto: se pueden asociar a este.
@@ -484,20 +485,100 @@ async function eliminarPresupuesto(id, button) {
     }
 }
 
+// ==========================================
+// LISTA DE PRESUPUESTOS: PESTAÑAS Y BUSCADOR
+// ==========================================
+// Los datos quedan en memoria para filtrar sin volver a pedirlos al servidor.
+let presupuestosCache = [];
+let clientesPresupuestosCache = [];
+let pestanaPresupuestos = 'en_curso';
+
+const PESTANAS_PRESUPUESTOS = ['en_curso', 'vencidos', 'pasados', 'cancelados', 'todos'];
+
+// Vencido = Borrador o Enviado con 15 días o más.
+function presupuestoVencido(p) {
+    const diasPasados = Math.floor((new Date() - new Date(p.fecha_creacion)) / (1000 * 60 * 60 * 24));
+    return (p.estado === 'Borrador' || p.estado === 'Enviado') && diasPasados >= 15;
+}
+
+// Cada presupuesto cae en una sola pestaña.
+function pestanaDePresupuesto(p) {
+    if (p.convertido_a_trabajo) return 'pasados';
+    if (p.estado === 'Cancelado') return 'cancelados';
+    if (presupuestoVencido(p)) return 'vencidos';
+    return 'en_curso';
+}
+
+// Busca por marca, persona, producto o N° (se acepta con o sin "#").
+function coincideBusquedaPresupuesto(p, texto, cliente) {
+    if (!texto) return true;
+    const numero = p.id.substring(0, 6).toUpperCase();
+    const productos = (p.items || []).map(it => it.descripcion || '').join(' ');
+    const buscable = [nombreMarca(cliente), cliente?.nombre_completo, productos, numero].join(' ').toLowerCase();
+    return buscable.includes(texto.replace('#', '').toLowerCase());
+}
+
+// Presupuestos de la pestaña activa que pasan el buscador, del más nuevo al más viejo.
+function filtrarPresupuestos() {
+    const texto = (document.getElementById('buscar-presupuestos')?.value || '').trim();
+    return presupuestosCache
+        .filter(p => {
+            const cliente = clientesPresupuestosCache.find(c => c.id === p.cliente_id);
+            const enPestana = pestanaPresupuestos === 'todos' || pestanaDePresupuesto(p) === pestanaPresupuestos;
+            return enPestana && coincideBusquedaPresupuesto(p, texto, cliente);
+        })
+        .sort((a, b) => new Date(b.fecha_creacion) - new Date(a.fecha_creacion));
+}
+
+// Pone el contador de cada pestaña y resalta la activa.
+function actualizarPestanasPresupuestos() {
+    PESTANAS_PRESUPUESTOS.forEach(id => {
+        const boton = document.querySelector(`[data-pestana="${id}"]`);
+        if (!boton) return;
+        const cantidad = id === 'todos'
+            ? presupuestosCache.length
+            : presupuestosCache.filter(p => pestanaDePresupuesto(p) === id).length;
+        boton.querySelector('.contador').textContent = cantidad;
+        const activa = id === pestanaPresupuestos;
+        boton.style.background = activa ? 'var(--ink)' : '';
+        boton.style.color = activa ? 'white' : '';
+    });
+}
+
+function cambiarPestanaPresupuestos(id) {
+    pestanaPresupuestos = id;
+    renderPresupuestos();
+}
+
 async function cargarPresupuestos() {
     try {
         const [respP, respC] = await Promise.all([ fetch(`${API_URL}/presupuestos/`), fetch(`${API_URL}/clientes/`) ]);
         if(!respP.ok) return; 
         
-        const presupuestos = await respP.json();
-        const clientes = await respC.json();
+        presupuestosCache = await respP.json();
+        clientesPresupuestosCache = await respC.json();
+        renderPresupuestos();
+    } catch (e) { console.error(e); }
+}
+
+// Pinta la tabla según la pestaña activa y el buscador.
+function renderPresupuestos() {
+        const clientes = clientesPresupuestosCache;
         const tbody = document.querySelector('#tablePresupuestos tbody');
         if (!tbody) return;
+        actualizarPestanasPresupuestos();
 
         tbody.innerHTML = '';
-        presupuestos.reverse().forEach(p => {
+        const lista = filtrarPresupuestos();
+        if (!lista.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--muted);">No hay presupuestos en esta pestaña.</td></tr>';
+            return;
+        }
+
+        lista.forEach(p => {
             const cliente = clientes.find(c => c.id === p.cliente_id);
-            const nombreCliente = cliente ? cliente.nombre_completo : 'Sin cliente';
+            const nombreCliente = cliente ? nombreMarca(cliente) : 'Sin cliente';
+            const nombrePersona = cliente?.nombre_completo && cliente.nombre_completo !== nombreCliente ? cliente.nombre_completo : '';
             const shortId = p.id.substring(0,6).toUpperCase(); // ID DEL NUEVO
             
             // Lógica de Vencimiento
@@ -537,7 +618,7 @@ async function cargarPresupuestos() {
             tbody.innerHTML += `
                 <tr>
                     <td>${p.fecha_creacion}</td>
-                    <td><b>${esc(nombreCliente)}</b></td>
+                    <td><b>${esc(nombreCliente)}</b>${nombrePersona ? `<br><span style="font-size:11px; color:var(--muted);">${esc(nombrePersona)}</span>` : ''}</td>
                     <td>
                         <span style="font-size:11px; color:var(--muted);">#${shortId}</span><br>
                         ${resumenItems}
@@ -555,7 +636,6 @@ async function cargarPresupuestos() {
                 </tr>
             `;
         });
-    } catch (e) { console.error(e); }
 }
 
 async function convertirATrabajo(presupuesto_id, button) {

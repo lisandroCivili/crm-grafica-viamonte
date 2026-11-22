@@ -83,6 +83,8 @@
         <button class="btn" style="background: var(--ink);" onclick="abrirDrawerCheque()">+ Ingresar Cheque</button>
       </div>
 
+      <div id="calendario-cheques"></div>
+
       <div class="table-container" style="margin-top: 20px;">
         <table id="tableCheques">
           <thead>
@@ -299,7 +301,16 @@
         <button class="btn" onclick="abrirDrawerPresupuesto()">+ Nuevo Presupuesto</button>
       </div>
 
-      <div class="table-container" style="margin-top: 20px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:20px;">
+        <button class="btn secondary" data-pestana="en_curso" style="font-size:13px;" onclick="cambiarPestanaPresupuestos('en_curso')">En curso <span class="contador">0</span></button>
+        <button class="btn secondary" data-pestana="vencidos" style="font-size:13px;" onclick="cambiarPestanaPresupuestos('vencidos')">Vencidos <span class="contador">0</span></button>
+        <button class="btn secondary" data-pestana="pasados" style="font-size:13px;" onclick="cambiarPestanaPresupuestos('pasados')">Pasados a trabajo <span class="contador">0</span></button>
+        <button class="btn secondary" data-pestana="cancelados" style="font-size:13px;" onclick="cambiarPestanaPresupuestos('cancelados')">Cancelados <span class="contador">0</span></button>
+        <button class="btn secondary" data-pestana="todos" style="font-size:13px;" onclick="cambiarPestanaPresupuestos('todos')">Todos <span class="contador">0</span></button>
+        <input type="search" id="buscar-presupuestos" placeholder="Buscar por marca, cliente, producto o N° (#A324D7)" oninput="renderPresupuestos()" style="margin-left:auto; min-width:280px; padding:8px;">
+      </div>
+
+      <div class="table-container" style="margin-top: 12px;">
         <table id="tablePresupuestos">
           <thead>
             <tr>
@@ -1457,6 +1468,7 @@
     <script src="js/stock.js"></script>
     <script src="js/dashboard.js"></script>
     <script src="js/cheques.js"></script>
+    <script src="js/cheques_calendario.js"></script>
     <script src="js/asistencia.js"></script>
     <script src="js/auditoria.js"></script>
     <script src="js/manual.js"></script>

@@ -41,7 +41,7 @@ async function cargarDashboard() {
                 const fechaCobroDate = new Date(ch.fecha_cobro + 'T00:00:00');
                 if (fechaCobroDate.getTime() <= limiteMs) {
                     const cli = clientes.find(c => c.id === ch.cliente_id);
-                    const nomCli = cli ? (cli.nombre_completo || cli.nombre || 'Desc.') : 'Desc.';
+                    const nomCli = cli ? nombreMarca(cli) : 'Desc.';
                     const esVencido = fechaCobroDate.getTime() < hoyMs ? 'color:var(--red);' : '';
                     
                     htmlAlertasCheques += `

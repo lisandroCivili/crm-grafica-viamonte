@@ -152,6 +152,22 @@ window.fetch = async (recurso, opciones = {}) => {
 };
 
 // ==========================================
+// NOMBRE DE CLIENTE PARA MOSTRAR
+// ==========================================
+// Los clientes se conocen por su marca (nombre_empresa). Si no tienen marca
+// cargada, se usa el nombre de la persona.
+function nombreMarca(cliente) {
+    return cliente?.nombre_empresa || cliente?.nombre_completo || cliente?.nombre || 'Sin nombre';
+}
+
+// Texto para los selectores: la marca, y entre paréntesis la persona si es otra.
+function opcionCliente(cliente) {
+    const marca = nombreMarca(cliente);
+    const persona = cliente?.nombre_completo;
+    return persona && persona !== marca ? `${marca} (${persona})` : marca;
+}
+
+// ==========================================
 // QUE VE CADA PUESTO
 // ==========================================
 // Aca NO se protege nada: lo que protege son los permisos del backend, que
