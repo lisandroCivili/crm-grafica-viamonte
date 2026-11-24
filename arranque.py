@@ -24,6 +24,8 @@ USUARIOS_INICIALES = [
     ("marcos", ROL_ENCARGADO, "CLAVE_INICIAL_MARCOS"),
     ("lucio", ROL_MOSTRADOR, "CLAVE_INICIAL_LUCIO"),
     ("david", ROL_MOSTRADOR, "CLAVE_INICIAL_DAVID"),
+    ("ricardo", ROL_MOSTRADOR, "CLAVE_INICIAL_RICARDO"),
+    ("antonela", ROL_MOSTRADOR, "CLAVE_INICIAL_ANTONELA"),
     # Sólo se define CLAVE_INICIAL_DEMO en el servicio de demo (repo/deploy
     # aparte, con su propia base): en producción esta variable no existe, así
     # que este usuario nunca nace ahí.

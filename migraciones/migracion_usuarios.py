@@ -41,6 +41,8 @@ USUARIOS_INICIALES = [
     ("marcos", ROL_ENCARGADO),
     ("lucio", ROL_MOSTRADOR),
     ("david", ROL_MOSTRADOR),
+    ("ricardo", ROL_MOSTRADOR),
+    ("antonela", ROL_MOSTRADOR),
 ]
 
 LARGO_MINIMO = 4

@@ -25,21 +25,29 @@ def con_claves(monkeypatch):
     monkeypatch.setenv("CLAVE_INICIAL_MARCOS", "clave-del-encargado")
     monkeypatch.setenv("CLAVE_INICIAL_LUCIO", "clave-del-mostrador")
     monkeypatch.setenv("CLAVE_INICIAL_DAVID", "clave-de-david")
+    monkeypatch.setenv("CLAVE_INICIAL_RICARDO", "clave-de-ricardo")
+    monkeypatch.setenv("CLAVE_INICIAL_ANTONELA", "clave-de-antonela")
 
 
 @pytest.fixture
 def sin_claves(monkeypatch):
     """Ninguna variable definida: es como corre en la compu del taller."""
-    for variable in ("CLAVE_INICIAL_FACUNDO", "CLAVE_INICIAL_MARCOS", "CLAVE_INICIAL_LUCIO", "CLAVE_INICIAL_DAVID"):
+    for variable in (
+        "CLAVE_INICIAL_FACUNDO", "CLAVE_INICIAL_MARCOS", "CLAVE_INICIAL_LUCIO",
+        "CLAVE_INICIAL_DAVID", "CLAVE_INICIAL_RICARDO", "CLAVE_INICIAL_ANTONELA",
+    ):
         monkeypatch.delenv(variable, raising=False)
 
 
-def test_crea_los_cuatro_usuarios_en_una_base_vacia(db, con_claves):
+def test_crea_los_usuarios_en_una_base_vacia(db, con_claves):
     creados = _sembrar(db)
 
-    assert creados == ["facundo", "marcos", "lucio", "david"]
+    assert creados == ["facundo", "marcos", "lucio", "david", "ricardo", "antonela"]
     roles = {u.nombre: u.rol for u in db.query(models.Usuario).all()}
-    assert roles == {"facundo": "admin", "marcos": "encargado", "lucio": "mostrador", "david": "mostrador"}
+    assert roles == {
+        "facundo": "admin", "marcos": "encargado", "lucio": "mostrador",
+        "david": "mostrador", "ricardo": "mostrador", "antonela": "mostrador",
+    }
 
 
 def test_la_contrasena_queda_hasheada_y_sirve_para_entrar(db, con_claves):
@@ -63,7 +71,7 @@ def test_arrancar_dos_veces_no_duplica_ni_pisa(db, con_claves):
     _sembrar(db)
 
     assert _sembrar(db) == []
-    assert db.query(models.Usuario).count() == 4
+    assert db.query(models.Usuario).count() == 6
 
 
 def test_no_le_cambia_la_contrasena_a_quien_ya_existe(db, con_claves):
